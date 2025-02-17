@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import pandas as pd
 import ttkbootstrap as tb  # Modern UI Framework
+import darkdetect #detect system default active UI
 
 # Global variables
 df = None
@@ -9,22 +10,13 @@ df = None
 # Global variable to store the last filtered dataset
 filtered_df = None
 
-def sort_column(order):
-    global filtered_df
-    selected_column = column_var.get()
-
-    # Ensure there's data to sort and a valid column is selected
-    if filtered_df is not None and selected_column in filtered_df.columns:
-        filtered_df = filtered_df.sort_values(by=selected_column, ascending=(order == "asc"))
-        display_data(filtered_df)  # Display only the sorted filtered data
-
-
 # Initialize GUI
-root = tb.Window(themename="darkly")  # Default theme, fixed
+theme = "darkly" if darkdetect.isDark() else "journal"
+
+root = tb.Window(themename=theme)  # Default theme, fixed
 root.title("Advanced Data Search & Export Tool 1.06")
 root.geometry("1920x1080")
 root.state("zoomed")
-
 
 # 🟢 Upload File Function
 def upload_file():
@@ -108,7 +100,6 @@ def clear_filters():
 
     display_data(filtered_df)  # Refresh without sorting icons
 
-
 # 🔍 Combined Search (Main & Sub-Search)
 def search_and_generate():
     global df, filtered_df
@@ -185,7 +176,6 @@ def export_filtered_data(format):
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save file: {e}")
 
-
 # 🔹 UI Layout - Top Bar
 top_frame = tb.Frame(root)
 top_frame.pack(pady=10, fill=tk.X, padx=20)
@@ -229,7 +219,6 @@ sub_search_btn.pack(side=tk.LEFT, padx=10)
 column_var = tk.StringVar(value="All Columns")
 column_dropdown = ttk.Combobox(top_frame, textvariable=column_var, state="readonly")
 # column_dropdown.pack(side=tk.LEFT, padx=10)
-
 
 # 🔍 Filter Type Dropdown
 filter_var = tk.StringVar(value="Contains")
