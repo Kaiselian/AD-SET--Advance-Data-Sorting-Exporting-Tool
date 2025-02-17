@@ -4,6 +4,15 @@ import pandas as pd
 import ttkbootstrap as tb  # Modern UI Framework
 import darkdetect #detect system default active UI
 
+# Detect System Theme (Light/Dark)
+def get_system_theme():
+    return "darkly" if darkdetect.isDark() else "journal"
+
+# 🔄 Function to Change Theme
+def change_theme(selected_theme):
+    global root
+    root.style.theme_use(selected_theme)  # Apply the new theme instantly
+
 # Global variables
 df = None
 
@@ -17,6 +26,7 @@ root = tb.Window(themename=theme)  # Default theme, fixed
 root.title("Advanced Data Search & Export Tool 1.06")
 root.geometry("1920x1080")
 root.state("zoomed")
+
 
 # 🟢 Upload File Function
 def upload_file():
@@ -100,6 +110,7 @@ def clear_filters():
 
     display_data(filtered_df)  # Refresh without sorting icons
 
+
 # 🔍 Combined Search (Main & Sub-Search)
 def search_and_generate():
     global df, filtered_df
@@ -176,6 +187,7 @@ def export_filtered_data(format):
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save file: {e}")
 
+
 # 🔹 UI Layout - Top Bar
 top_frame = tb.Frame(root)
 top_frame.pack(pady=10, fill=tk.X, padx=20)
@@ -190,17 +202,6 @@ search_entry.bind("<Return>", lambda event: search_and_generate())  # ENTER trig
 
 search_btn = tb.Button(top_frame, text="🔍", bootstyle="success", command=search_and_generate)
 search_btn.pack(side=tk.LEFT, padx=10)
-
-# Clear Button
-clear_btn = tb.Button(top_frame, text="❌ Clear Filters", bootstyle="danger", command=clear_filters)
-clear_btn.pack(side=tk.LEFT, padx=10)
-
-# 📤 Export Buttons
-export_filtered_csv_btn = tb.Button(top_frame, text="📤 Export Filtered CSV", bootstyle="warning", command=lambda: export_filtered_data("csv"))
-export_filtered_csv_btn.pack(side=tk.RIGHT, padx=10)
-
-export_filtered_xlsx_btn = tb.Button(top_frame, text="📤 Export Filtered Excel", bootstyle="warning", command=lambda: export_filtered_data("xlsx"))
-export_filtered_xlsx_btn.pack(side=tk.RIGHT, padx=10)
 
 # 🔍 Sub-Search Bar & Column Selection
 sub_search_var = tk.StringVar()
@@ -218,12 +219,48 @@ sub_search_btn.pack(side=tk.LEFT, padx=10)
 # 🔽 Column Dropdown
 column_var = tk.StringVar(value="All Columns")
 column_dropdown = ttk.Combobox(top_frame, textvariable=column_var, state="readonly")
-# column_dropdown.pack(side=tk.LEFT, padx=10)
 
 # 🔍 Filter Type Dropdown
 filter_var = tk.StringVar(value="Contains")
 filter_dropdown = ttk.Combobox(top_frame, textvariable=filter_var, state="readonly", values=["Contains", "Equals", "Starts with"])
-# filter_dropdown.pack(side=tk.LEFT, padx=10)
+
+# Clear Button
+clear_btn = tb.Button(top_frame, text="❌ Clear Filters", bootstyle="danger", command=clear_filters)
+clear_btn.pack(side=tk.LEFT, padx=10)
+
+# 📤 Export Buttons
+export_filtered_csv_btn = tb.Button(top_frame, text="📤 Export Filtered CSV", bootstyle="warning", command=lambda: export_filtered_data("csv"))
+export_filtered_csv_btn.pack(side=tk.RIGHT, padx=10)
+
+export_filtered_xlsx_btn = tb.Button(top_frame, text="📤 Export Filtered Excel", bootstyle="warning", command=lambda: export_filtered_data("xlsx"))
+export_filtered_xlsx_btn.pack(side=tk.RIGHT, padx=10)
+
+# 🎨 Theme Selection (Placed at the Top-Right Corner)
+
+# 🎨 Theme Selection with Emojis
+theme_options = {
+    "darkly": "🌙",
+    "journal": "📖",
+    "flatly": "📄",
+    "cyborg": "🤖",
+    "superhero": "🦸",
+    "minty": "🌿"
+}
+
+theme_var = tk.StringVar(value=theme_options[theme])
+theme_dropdown = ttk.Combobox(top_frame, textvariable=theme_var, state="readonly",
+                              values=list(theme_options.values()), width=3)
+theme_dropdown.pack(side=tk.RIGHT, padx=5)
+
+# Update theme based on emoji selection
+def change_theme_emoji(event):
+    selected_theme_emoji = theme_var.get()
+    for key, value in theme_options.items():
+        if value == selected_theme_emoji:
+            change_theme(key)  # Apply theme using its original name
+            break
+
+theme_dropdown.bind("<<ComboboxSelected>>", change_theme_emoji)
 
 # 🔹 Treeview for Data Display
 frame2 = tb.Frame(root)
