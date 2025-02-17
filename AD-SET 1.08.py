@@ -23,7 +23,7 @@ filtered_df = None
 theme = "darkly" if darkdetect.isDark() else "journal"
 
 root = tb.Window(themename=theme)  # Default theme, fixed
-root.title("Advanced Data Search & Export Tool 1.06")
+root.title("Advanced Data Search & Export Tool 1.08")
 root.geometry("1920x1080")
 root.state("zoomed")
 
