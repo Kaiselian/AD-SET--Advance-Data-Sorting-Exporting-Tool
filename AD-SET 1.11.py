@@ -3,6 +3,16 @@ from tkinter import filedialog, messagebox, ttk
 import pandas as pd
 import ttkbootstrap as tb  # Modern UI Framework
 import darkdetect #detect system default active UI
+from fpdf import FPDF
+import openpyxl
+import pdfplumber  # Extract tables from PDFs
+from reportlab.pdfgen import canvas
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
+from reportlab.lib.styles import getSampleStyleSheet
+import os
+
 
 # Detect System Theme (Light/Dark)
 def get_system_theme():
@@ -23,10 +33,9 @@ filtered_df = None
 theme = "darkly" if darkdetect.isDark() else "journal"
 
 root = tb.Window(themename=theme)  # Default theme, fixed
-root.title("Advanced Data Search & Export Tool 1.08")
+root.title("Advanced Data Search & Export Tool 1.11")
 root.geometry("1920x1080")
 root.state("zoomed")
-
 
 # 🟢 Upload File Function
 def upload_file():
@@ -47,29 +56,31 @@ def upload_file():
             messagebox.showerror("Error", f"Failed to load file: {e}")
             print("Upload Error:", e)  # Debugging
 
-# 🔄 Display Data in Treeview with Sorting Buttons
+# Display Data in Treeview with Proper Table Formatting
 def display_data(data):
     global filtered_df
     filtered_df = data  # Store filtered data
 
     tree.delete(*tree.get_children())  # Clear existing data
     tree["columns"] = list(data.columns)
-    tree["show"] = "headings"
+    tree["show"] = "headings"  # Ensure only table headers are visible, not row indices
 
-    # Loop through columns and add sorting icons only to the last sorted column
+    # Adjust columns dynamically
     for col in data.columns:
         arrow = ""
         if col in sort_orders and sort_orders[col] is not None:  # Show arrow only if column was sorted
             arrow = " ⬆" if sort_orders[col] else " ⬇"
+
         tree.heading(col, text=f"{col}{arrow}", command=lambda c=col: toggle_sort_order(c))
-        tree.column(col, width=150, anchor="center")
+        tree.column(col, width=150, anchor="center")  # Set a default width
 
     for _, row in data.iterrows():
         tree.insert("", "end", values=list(row))
 
+    tree.update_idletasks()  # Refresh to apply changes
+
 # 🔼🔽 Toggle Sort Order
 sort_orders = {}  # Dictionary to track column sorting order
-
 def toggle_sort_order(column):
     global filtered_df
 
@@ -183,9 +194,149 @@ def export_filtered_data(format):
                 filtered_df.to_excel(save_path, index=False)
             elif format == "csv":
                 filtered_df.to_csv(save_path, index=False)
+            elif format == "pdf":
+                save_df_as_pdf(filtered_df, save_path)
             messagebox.showinfo("Success", f"Filtered data saved as {format.upper()} successfully!")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save file: {e}")
+
+# 🖨 Convert Excel DataFrame to PDF
+def save_df_as_pdf(df, save_path):
+    # Define Portrait A4 size as default
+    page_width, page_height = A4
+
+    # Calculate total column width by summing up estimated widths of the columns
+    column_widths = [max(len(str(col)) * 6, 50) for col in
+                     df.columns]  # Adjust based on content and minimum column width
+    total_column_width = sum(column_widths) + 20  # Add some padding to the total width (e.g., 20 units)
+
+    # If total column width exceeds page width, switch to Landscape orientation
+    if total_column_width > page_width - 40:  # Considering margins of 20 units on each side
+        page_width, page_height = landscape(A4)
+
+    # Create PDF document with the determined page orientation
+    doc = SimpleDocTemplate(save_path, pagesize=(page_width, page_height))
+    elements = []
+
+    # Convert DataFrame to list of lists
+    data = [df.columns.tolist()] + df.astype(str).values.tolist()
+
+    # Create Table
+    table = Table(data)
+
+    # Add Styling
+    style = TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),  # Header background
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),  # Header text color
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),  # Center align all cells
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),  # Bold font for header
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),  # Padding for header
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),  # Row background
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),  # Table grid
+    ])
+
+    table.setStyle(style)
+
+    # Scale the table to fit within the printable area
+    available_width = page_width - 40  # Margins (20 on each side)
+    available_height = page_height - 40  # Margins (20 on top/bottom)
+
+    # Get the natural table size
+    table_width, table_height = table.wrap(available_width, available_height)
+
+    # Calculate scaling factor based on the available space
+    scale_factor = min(available_width / table_width if table_width else 1,
+                       available_height / table_height if table_height else 1)
+
+    # Apply scaling factor to columns and rows
+    scaled_column_widths = [w * scale_factor if w else 0 for w in column_widths]
+    table._colWidths = scaled_column_widths
+    table._rowHeights = [h * scale_factor if h else 0 for h in table._rowHeights]
+
+    # Recalculate table size after scaling
+    table_width, table_height = table.wrap(available_width, available_height)
+
+    # Ensure table still fits within page, reapply scale if necessary
+    if table_width > available_width or table_height > available_height:
+        print("Warning: The table still doesn't fit despite scaling. Check column widths or data size.")
+
+    elements.append(table)
+
+    # Build the PDF document
+    doc.build(elements)
+
+    print(f"PDF saved successfully with {'Landscape' if page_width > page_height else 'Portrait'} orientation!")
+
+ # Function to Export Each Row Individually as PDF
+def export_each_row_as_pdf():
+    global filtered_df
+    if filtered_df is None or filtered_df.empty:
+        messagebox.showerror("Error", "No data to export.")
+        return
+
+    save_directory = filedialog.askdirectory()
+    if not save_directory:
+        return
+
+    styles = getSampleStyleSheet()
+    for index, row in filtered_df.iterrows():
+        file_path = os.path.join(save_directory, f"Row_{index + 1}.pdf")
+        doc = SimpleDocTemplate(file_path, pagesize=letter)
+        elements = []
+
+        elements.append(Paragraph("Row Data", styles['Title']))
+        table_data = [[col, str(row[col])] for col in filtered_df.columns]
+        table = Table(table_data)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+
+        elements.append(table)
+        doc.build(elements)
+
+    messagebox.showinfo("Success", "Each row exported as an individual PDF.")
+
+#PDF TO EXCEL
+def convert_pdf_to_excel():
+    file_path = filedialog.askopenfilename(filetypes=[("PDF files", "*.pdf")])
+    if not file_path:
+        return
+
+    save_path = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx")])
+    if not save_path:
+        return
+
+    extracted_data = []
+    headers = None  # Store column headers separately
+
+    with pdfplumber.open(file_path) as pdf:
+        for page in pdf.pages:
+            tables = page.extract_tables()
+
+            for table in tables:
+                if table:
+                    first_row = table[0]  # First row of the table
+                    if headers is None:  # Set headers only once
+                        #headers = first_row
+                        extracted_data.append(headers)
+                    else:
+                        # If the first row is just numbers, ignore it
+                        if all(cell.isdigit() for cell in first_row if cell):
+                            table = table[1:]  # Skip first row
+
+                    for row in table:
+                        extracted_data.append(row)
+
+    if extracted_data:
+        df = pd.DataFrame(extracted_data[1:], columns=extracted_data[0])  # Use first row as headers
+        df.to_excel(save_path, index=False)
+        messagebox.showinfo("Success", "PDF converted to Excel successfully!")
+    else:
+        messagebox.showerror("Error", "No tables found in the PDF.")
 
 
 # 🔹 UI Layout - Top Bar
@@ -228,14 +379,22 @@ filter_dropdown = ttk.Combobox(top_frame, textvariable=filter_var, state="readon
 clear_btn = tb.Button(top_frame, text="❌ Clear Filters", bootstyle="danger", command=clear_filters)
 clear_btn.pack(side=tk.LEFT, padx=10)
 
+# PDF TO EXCEL Button
+pdf_to_excel_btn = tb.Button(top_frame, text="📥 PDF to Excel", bootstyle="info", command=convert_pdf_to_excel)
+pdf_to_excel_btn.pack(side=tk.RIGHT, padx=10)
+
 # 📤 Export Buttons
-export_filtered_csv_btn = tb.Button(top_frame, text="📤 Export Filtered CSV", bootstyle="warning", command=lambda: export_filtered_data("csv"))
+export_filtered_csv_btn = tb.Button(top_frame, text="📤 CSV", bootstyle="warning", command=lambda: export_filtered_data("csv"))
 export_filtered_csv_btn.pack(side=tk.RIGHT, padx=10)
 
-export_filtered_xlsx_btn = tb.Button(top_frame, text="📤 Export Filtered Excel", bootstyle="warning", command=lambda: export_filtered_data("xlsx"))
+export_filtered_xlsx_btn = tb.Button(top_frame, text="📤 Excel", bootstyle="warning", command=lambda: export_filtered_data("xlsx"))
 export_filtered_xlsx_btn.pack(side=tk.RIGHT, padx=10)
 
-# 🎨 Theme Selection (Placed at the Top-Right Corner)
+export_table_pdf_btn = tb.Button(top_frame, text="📤 Full PDF", bootstyle="warning", command=lambda: export_filtered_data("pdf"))
+export_table_pdf_btn.pack(side=tk.RIGHT, padx=10)
+
+export_rows_pdf_btn = tb.Button(top_frame, text="📤 Ind PDF", bootstyle="warning", command=lambda: export_each_row_as_pdf())
+export_rows_pdf_btn.pack(side=tk.RIGHT, padx=10)
 
 # 🎨 Theme Selection with Emojis
 theme_options = {
