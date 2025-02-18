@@ -33,8 +33,4 @@ This is a **Tkinter-based GUI application** that allows users to **upload, filte
 2. Use the **Search Bar** to filter data dynamically.  
 3. Click on column headers to sort.  
 4. **Toggle Columns** to hide/show specific data fields.  
-5. Click **📤 Export** to save the filtered results.  
-
----
-
-This should be a solid **Git repository description** and **README** outline for your project. Let me know if you need modifications! 🚀
+5. Click **📤 Export** to save the filtered results.
