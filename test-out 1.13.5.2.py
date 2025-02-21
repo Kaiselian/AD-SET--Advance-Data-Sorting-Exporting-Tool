@@ -30,6 +30,8 @@ df = None
 current_zoom = 1.0
 pdf_path = None
 pdf_document = None
+text_boxes = []
+box_data = []
 
 # Global variable to store the last filtered dataset
 filtered_df = None
@@ -38,88 +40,88 @@ filtered_df = None
 theme = "darkly" if darkdetect.isDark() else "journal"
 
 root = tb.Window(themename=theme)  # Default theme, fixed
-root.title("Advanced Data Search & Export Tool 1.13")
+root.title("Advanced Data Search & Export Tool 1.13.5.2")
 root.geometry("1920x1080")
 root.state("zoomed")
 
 # Load a PDF file and display preview.
 def load_pdf():
-    global pdf_path, pdf_document, pdf_window, pdf_canvas, pdf_img, text_boxes, box_data, column_var, column_dropdown
+    global pdf_path, pdf_document, pdf_canvas, pdf_img, text_boxes, box_data
 
-    if pdf_document is None:  # Keep PDF in RAM
-        pdf_path = filedialog.askopenfilename(filetypes=[("PDF files", "*.pdf")])
-        if not pdf_path:
-            return
-        pdf_document = fitz.open(pdf_path)
+    pdf_path = filedialog.askopenfilename(filetypes=[("PDF files", "*.pdf")])
+    if not pdf_path:
+        return
 
-    # Open a new window for PDF preview
+    pdf_document = fitz.open(pdf_path)  # Keep PDF in RAM
+    page = pdf_document[0]
+    pix = page.get_pixmap()
+    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+    img.thumbnail((800, 1000))
+    pdf_img = ImageTk.PhotoImage(img)
+
     pdf_window = tk.Toplevel(root)
     pdf_window.title("PDF Preview - Assign Data Fields")
     pdf_window.geometry("1200x900")
     pdf_window.state("zoomed")
 
-    # Read first page of PDF and convert to image
-    page = pdf_document[0]
-    pix = page.get_pixmap()
-    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-    img.thumbnail((800, 1000))  # Resize for display
-    pdf_img = ImageTk.PhotoImage(img)
+    frame_right = tk.Frame(pdf_window, width=300, bg="#f0f0f0")
+    frame_right.pack(side=tk.RIGHT, fill=tk.Y)
 
-    # Create a frame for layout
-    main_frame = tk.Frame(pdf_window)
-    main_frame.pack(fill=tk.BOTH, expand=True)
+    btn_export = tk.Button(frame_right, text="📤 Export PDFs", command=export_filled_pdfs)
+    btn_export.pack(pady=10, padx=10, fill=tk.X)
 
-    # PDF Canvas
-    pdf_canvas = tk.Canvas(main_frame, width=img.width, height=img.height)
-    pdf_canvas.grid(row=0, column=0, padx=10, pady=10)
-    pdf_canvas.create_image(0, 0, anchor=tk.NW, image=pdf_img)
-
-    # Sidebar for column selection and controls
-    sidebar = tk.Frame(main_frame, width=300, relief=tk.SUNKEN, bd=2)
-    sidebar.grid(row=0, column=1, sticky=tk.NS, padx=10, pady=10)
-
-    # Export button at the top
-    btn_export = tk.Button(sidebar, text="📤 Export Filled PDFs", command=export_filled_pdfs, bg="green", fg="white")
-    btn_export.pack(pady=10, fill=tk.X)
-
-    # Dropdown for column selection
     column_var = tk.StringVar()
-    column_dropdown = ttk.Combobox(sidebar, textvariable=column_var, state="readonly")
-    column_dropdown.pack(pady=5, fill=tk.X)
+    column_dropdown = ttk.Combobox(frame_right, textvariable=column_var, state="readonly")
+    column_dropdown.pack(pady=5, padx=10, fill=tk.X)
     update_columns()
 
-    text_boxes = []
-    box_data = []
+    pdf_canvas = tk.Canvas(pdf_window, width=img.width, height=img.height)
+    pdf_canvas.pack(side=tk.LEFT, expand=True)
+    pdf_canvas.create_image(0, 0, anchor=tk.NW, image=pdf_img)
 
-    # Function to add a draggable text box
     def add_text_box():
         if df is None:
             messagebox.showerror("Error", "Please upload an Excel/CSV file first.")
             return
 
-        box = tk.Entry(pdf_canvas, font=("Arial", 12), width=15)
-        text_boxes.append(box)
-        x, y = 50, 50 + len(text_boxes) * 30
-        box_window = pdf_canvas.create_window(x, y, window=box, anchor=tk.NW)
-        box_data.append({"entry": box, "window": box_window, "x": x, "y": y, "column": None})
+        frame = tk.Frame(pdf_window)
+        entry = tk.Entry(frame, font=("Arial", 12), width=15)
+        entry.pack(side=tk.LEFT)
 
-        # Dropdown to select column for this text box
-        col_dropdown = ttk.Combobox(sidebar, values=list(df.columns), state="readonly")
-        col_dropdown.pack(pady=2, fill=tk.X)
+        box_window = pdf_canvas.create_window(50, 50 + len(text_boxes) * 30, window=frame, anchor=tk.NW)
+        text_boxes.append(entry)
+        box_data.append({"entry": entry, "window": box_window, "x": 50, "y": 50, "column": None})
+
+        col_dropdown = ttk.Combobox(frame_right, values=list(df.columns), state="readonly")
+        col_dropdown.pack(pady=2, padx=10, fill=tk.X)
         box_data[-1]["column"] = col_dropdown
 
-        # Make text box draggable
         def on_drag(event):
             pdf_canvas.coords(box_window, event.x, event.y)
 
-        box.bind("<B1-Motion>", on_drag)
+        def on_resize(event):
+            entry.config(width=max(5, int(event.width / 10)))
 
-    # Button to add text boxes
-    btn_add_box = tk.Button(sidebar, text="➕ Add Text Box", command=add_text_box)
-    btn_add_box.pack(pady=10, fill=tk.X)
+        entry.bind("<B1-Motion>", on_drag)
+        entry.bind("<Configure>", on_resize)
 
-    messagebox.showinfo("Success", "PDF Loaded! Drag and assign data fields.")
+        def adjust_font():
+            selected_font = font_var.get()
+            selected_size = size_var.get()
+            entry.config(font=(selected_font, selected_size))
 
+        font_var = tk.StringVar(value="Arial")
+        size_var = tk.IntVar(value=12)
+
+        font_dropdown = ttk.Combobox(frame_right, textvariable=font_var, values=["Arial", "Times New Roman", "Courier"], state="readonly")
+        font_dropdown.pack(pady=2, padx=10, fill=tk.X)
+        size_dropdown = ttk.Combobox(frame_right, textvariable=size_var, values=[8, 10, 12, 14, 16, 18, 20], state="readonly")
+        size_dropdown.pack(pady=2, padx=10, fill=tk.X)
+        btn_apply_font = tk.Button(frame_right, text="Apply Font", command=adjust_font)
+        btn_apply_font.pack(pady=5, padx=10, fill=tk.X)
+
+    btn_add_box = tk.Button(frame_right, text="➕ Add Text Box", command=add_text_box)
+    btn_add_box.pack(pady=10, padx=10, fill=tk.X)
 
 def export_filled_pdfs():
     if df is None:
@@ -139,9 +141,11 @@ def export_filled_pdfs():
     base_name = "Invoice"
     for index, row in df.iterrows():
         filled_pdf = fitz.open()
+
         for page in pdf_document:
             new_page = filled_pdf.new_page(width=page.rect.width, height=page.rect.height)
             new_page.show_pdf_page(new_page.rect, pdf_document, page.number)
+
             for box in box_data:
                 field = box["entry"]
                 field_column = box["column"].get()
@@ -149,12 +153,12 @@ def export_filled_pdfs():
                     text_value = str(row[field_column])
                     x, y = pdf_canvas.coords(box["window"])
                     new_page.insert_text((x, y), text_value, fontsize=12, color=(0, 0, 0))
+
         output_file = os.path.join(save_folder, f"{base_name}_{index + 1}.pdf")
         filled_pdf.save(output_file)
         filled_pdf.close()
 
     messagebox.showinfo("Success", f"PDFs saved in {save_folder}")
-
 
 # 🟢 Upload File Function
 def upload_file():
