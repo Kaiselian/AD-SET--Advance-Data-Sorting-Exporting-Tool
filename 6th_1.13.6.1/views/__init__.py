@@ -1,0 +1,1 @@
+from .pdf_view import PDFView
