@@ -14,22 +14,22 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 COLUMN_MAPPING = {
     'invoicenumber': 'INVOICE_NUMBER',
     'invoicedate': 'INVOICE_DATE',
-    'isddistributorgstin': 'ISD_DISTRIBUTOR_GSTIN',
-    'isddistributorname': 'ISD_DISTRIBUTOR_NAME',
-    'isddistributoraddress': 'ISD_DISTRIBUTOR_ADDRESS',
-    'isddistributorstate': 'ISD_DISTRIBUTOR_STATE',
-    'isddistributorpincode': 'ISD_DISTRIBUTOR_PINCODE',
-    'isddistributornumber': 'ISD_DISTRIBUTOR_NUMBER',
-    'creditrecipintgstin': 'CREDIT_RECIPIENT_GSTIN',
-    'creditrecipintname': 'CREDIT_RECIPIENT_NAME',
-    'creditrecipintaddress': 'CREDIT_RECIPIENT__ADDRESS',
-    'creditrecipintstate': 'CREDIT_RECIPIENT_STATE',  # Note double underscore
-    'creditrecipintpincode': 'CREDIT_RECIPIENT_PINCODE',
-    'creditrecipintnumber': 'CREDIT_RECIPIENT_NUMBER',
+    'recipientgstin': 'RECIPIENT_GSTIN',
+    'recipientname': 'RECIPIENT_NAME',
+    'recipientaddress': 'RECIPIENT_ADDRESS',
+    'recipientstate': 'RECIPIENT_STATE',
+    'recipientpincode': 'RECIPIENT_PINCODE',
+    'recipientnumber': 'RECIPIENT_NUMBER',
+    'suppliergstin': 'SUPPLIER_GSTIN',
+    'suppliername': 'SUPPLIER_NAME',
+    'supplieraddress': 'SUPPLIER_ADDRESS',
+    'supplierstate': 'SUPPLIER__STATE',  # Note double underscore
+    'supplierpincode': 'SUPPLIER_PINCODE',
+    'suppliernumber': 'SUPPLIER_NUMBER',
     'amount': 'AMOUNT',
     'regoffice': 'REG_OFFICE',
     'cin': 'CIN',
-    'email': 'E_MAIL',  # Maps template's 'E-mail' to data's 'E_MAIL'
+    'e-mail': 'E_MAIL',
     'website': 'WEBSITE',
     'cgst': 'CGST',
     'sgst': 'SGST',
@@ -143,53 +143,34 @@ def scan_template_placeholders(template_path: str) -> set:
 
 
 def prepare_row_data(row: pd.Series, template_placeholders: set) -> dict:
-    """Enhanced version with better amount_in_words handling"""
-
+    """Match data columns to template placeholders with exact mapping"""
     row_data = {}
 
-    # Handle core fields first
-    core_fields = {
-        'Invoice Number': 'INVOICE_NUMBER',
-        'Invoice Date': 'INVOICE_DATE',
-        'CIN': 'CIN',
-        'Website': 'WEBSITE'
-    }
-
-    for ph, data_key in core_fields.items():
-        if ph in template_placeholders and data_key in row:
-            row_data[ph] = format_value(row[data_key], ph)
-
-    # Process amount_in_words first
-    if 'amount_in_words' in template_placeholders:
-        try:
-            amount = float(row['AMOUNT'])
-            words = num2words(amount, lang='en_IN').title()
-            # Ensure proper formatting
-            words = words.replace('And', 'and')  # Fix capitalization
-            row_data['amount_in_words'] = f"{words} Rupees Only"
-        except Exception as e:
-            logging.error(f"Amount to words failed: {str(e)}")
-            row_data['amount_in_words'] = ""
-
-    # Process other placeholders
+    # Process each template placeholder
     for ph in template_placeholders:
-        if ph == 'amount_in_words':
-            continue  # Already handled
-
+        # Normalize the placeholder name
         norm_ph = ph.lower().replace(' ', '').replace('.', '').replace('-', '')
-        data_key = COLUMN_MAPPING.get(norm_ph)
 
+        # Special handling for amount_in_words
+        if norm_ph == 'amountinwords':
+            try:
+                amount = float(row['AMOUNT'])
+                row_data[ph] = num2words(amount, lang='en_IN').title() + " Rupees Only"
+            except:
+                row_data[ph] = ""
+            continue
+
+        # Find matching column using our mapping
+        data_key = COLUMN_MAPPING.get(norm_ph)
         if data_key and data_key in row:
             value = row[data_key]
-            if hasattr(value, 'item'):  # Handle numpy types
+            # Convert numpy types to native Python
+            if hasattr(value, 'item'):
                 value = value.item()
             row_data[ph] = format_value(value, ph)
         else:
             row_data[ph] = ""
-
-    # Special handling for email
-    if 'E-mail' in template_placeholders and 'E_MAIL' in row:
-        row_data['E-mail'] = row['E_MAIL']
+            logging.warning(f"No data mapping for placeholder: {ph}")
 
     return row_data
 
@@ -212,68 +193,110 @@ def replace_all_placeholders(doc, row_data):
 
 
 def process_table(table, row_data):
-    """Process tables with font size enforcement"""
-    from docx.shared import Pt
-
+    """Handle complex table structures with merged cells"""
     for row in table.rows:
         for cell in row.cells:
-            # Process nested tables first
-            if cell.tables:
-                for nested_table in cell.tables:
-                    process_table(nested_table, row_data)
+            # Join all paragraphs in cell to handle split placeholders
+            full_text = '\n'.join(p.text for p in cell.paragraphs)
 
-            # Process cell content
-            for paragraph in cell.paragraphs:
-                replace_in_paragraph(paragraph, row_data)
-                # Enforce 10pt font for all runs
-                for run in paragraph.runs:
-                    run.font.size = Pt(10)
+            # Replace placeholders
+            for ph, value in row_data.items():
+                full_text = full_text.replace(f'{{{{{ph}}}}}', str(value))
+
+            # Clear and rebuild cell content
+            cell.text = ''
+            cell.add_paragraph(full_text)
+
+        if len(table.rows) >= 7:  # Your recipient/supplier table
+            # Left column (recipient)
+            table.cell(1, 0).text = str(row_data.get('Recipient Name', ''))
+            table.cell(2, 0).text = str(row_data.get('Recipient Number', ''))
+            table.cell(3, 0).text = str(row_data.get('Recipient Address', ''))
+            table.cell(4, 0).text = str(row_data.get('Recipient Pincode', ''))
+            table.cell(5, 0).text = str(row_data.get('Recipient State', ''))
+            table.cell(6, 0).text = str(row_data.get('Recipient State Code', ''))
+            table.cell(7, 0).text = str(row_data.get('Recipient GSTIN', ''))
+            # ... etc for other recipient fields
+
+            # Right column (supplier)
+            table.cell(1, 1).text = str(row_data.get('Supplier Name', ''))
+            table.cell(2, 1).text = str(row_data.get('Supplier Number', ''))
+            table.cell(3, 1).text = str(row_data.get('Supplier Address', ''))
+            table.cell(4, 1).text = str(row_data.get('Supplier Pincode', ''))
+            table.cell(5, 1).text = str(row_data.get('Supplier State', ''))
+            table.cell(6, 1).text = str(row_data.get('Supplier State Code', ''))
+            table.cell(7, 1).text = str(row_data.get('Supplier GSTIN', ''))
+            # ... etc for other supplier fields
 
 
 def replace_in_paragraph(paragraph, row_data):
-    """Ensure complete text replacement with formatting"""
-    from docx.shared import Pt
-
-    # Combine all runs first to handle split placeholders
-    full_text = ''.join(run.text for run in paragraph.runs)
-    if not full_text.strip():
+    """Replace placeholders while preserving formatting"""
+    # First check if paragraph has any placeholders
+    if not any('{{' in run.text for run in paragraph.runs):
         return
 
+    # Store original runs with formatting
+    original_runs = []
+    for run in paragraph.runs:
+        original_runs.append({
+            'text': run.text,
+            'bold': run.bold,
+            'italic': run.italic,
+            'underline': run.underline,
+            'font': run.font.name,
+            'size': run.font.size
+        })
+
+    # Build full paragraph text
+    full_text = ''.join(r['text'] for r in original_runs)
+
     # Perform all replacements
+    modified = False
     for ph, value in row_data.items():
-        full_text = full_text.replace(f'{{{{{ph}}}}}', str(value))
+        if f'{{{{{ph}}}}}' in full_text:
+            full_text = full_text.replace(f'{{{{{ph}}}}}', str(value))
+            modified = True
 
-    # Clear and rebuild with original formatting
+    if not modified:
+        return
+
+    # Rebuild paragraph with original formatting
     paragraph.clear()
-    run = paragraph.add_run(full_text)
-    run.font.size = Pt(10)  # Enforce 10pt font
+    current_pos = 0
 
-    # Preserve first run's formatting
-    if paragraph.runs:
-        first_run = paragraph.runs[0]
-        first_run.font.size = Pt(10)
-        if paragraph.runs[0].font.name:
-            first_run.font.name = paragraph.runs[0].font.name
+    for run in original_runs:
+        run_text = full_text[current_pos:current_pos + len(run['text'])]
+        if run_text:  # Only add run if there's content
+            new_run = paragraph.add_run(run_text)
+            # Preserve formatting
+            new_run.bold = run['bold']
+            new_run.italic = run['italic']
+            new_run.underline = run['underline']
+            if run['font']:
+                new_run.font.name = run['font']
+            if run['size']:
+                new_run.font.size = run['size']
+
+        current_pos += len(run['text'])
 
 
 def format_value(value, key=None):
-    """Enhanced formatting to prevent truncation"""
+    """Handle special formatting and numpy types"""
     if pd.isna(value):
         return ""
 
-    # Handle numpy types
+    # Convert numpy types to native Python types
     if hasattr(value, 'item'):
         value = value.item()
 
-    # Special formatting for CIN
-    if key and key.upper() == 'CIN':
-        return str(value).strip()[:20]  # Limit to 20 chars but don't truncate mid-word
+    # Special formatting for Amount
+    if key and key.lower() == 'amount':
+        try:
+            return "{:,.2f}".format(float(value))
+        except:
+            return str(value)
 
-    # Special formatting for website
-    if key and key.lower() == 'website':
-        return str(value).strip()
-
-    # Default formatting
+    # Rest of your formatting logic...
     return str(value)
 
 def generate_output_path(output_folder: str, row_data: dict, idx: int) -> str:
@@ -281,3 +304,4 @@ def generate_output_path(output_folder: str, row_data: dict, idx: int) -> str:
     invoice_num = str(row_data.get('INVOICE_NUMBER', idx + 1)).strip().replace('/', '-')
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return os.path.join(output_folder, f"ISD_Invoice_{invoice_num}_{timestamp}.docx")
+
