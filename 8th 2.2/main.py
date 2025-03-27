@@ -14,7 +14,7 @@ from fpdf import FPDF
 import fitz
 import json
 import logging
-from utils.data_mapper import DataMapper
+from utils.data_mapper import DataMapper, map_data_to_docx
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
