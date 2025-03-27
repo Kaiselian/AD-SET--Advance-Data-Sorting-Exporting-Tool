@@ -50,8 +50,11 @@ class DataMapper:
         ]
         return df
 
-    def map_data_to_docx(self, template_path: str, data: pd.DataFrame, output_folder: str) -> Optional[List[str]]:
-        """Main function to generate DOCX files from template and data"""
+    def map_data_to_docx(parent, template_path: str, data: pd.DataFrame, output_folder: str) -> Optional[List[str]]:
+        mapper = DataMapper()
+
+        self.parent = parent
+
         try:
             if not self.validate_inputs(template_path, data, output_folder):
                 return None

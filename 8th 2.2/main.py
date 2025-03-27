@@ -14,7 +14,8 @@ from fpdf import FPDF
 import fitz
 import json
 import logging
-from utils.data_mapper import DataMapper, map_data_to_docx
+from utils.data_mapper import DataMapper
+from docx import Document
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -474,7 +475,7 @@ class MainApp(QMainWindow):
             return
 
         try:
-            mapper = DataMapper(self)
+            mapper = DataMapper()  # Remove self
             result = mapper.map_data_to_docx(
                 self.docx_template_path,
                 self.df,
