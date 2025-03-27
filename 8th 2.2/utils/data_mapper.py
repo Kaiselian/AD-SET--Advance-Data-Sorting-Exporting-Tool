@@ -3,281 +3,274 @@ import re
 import logging
 from docx import Document
 import pandas as pd
-from typing import List, Optional
+from typing import List, Optional, Set, Dict
 from datetime import datetime
-from copy import deepcopy
 from num2words import num2words
+from docx.shared import Pt
+from PyQt5.QtWidgets import QMessageBox
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
-# Add this at the top of your data_mapper.py file, right after the imports
-COLUMN_MAPPING = {
-    'invoicenumber': 'INVOICE_NUMBER',
-    'invoicedate': 'INVOICE_DATE',
-    'isddistributorgstin': 'ISD_DISTRIBUTOR_GSTIN',
-    'isddistributorname': 'ISD_DISTRIBUTOR_NAME',
-    'isddistributoraddress': 'ISD_DISTRIBUTOR_ADDRESS',
-    'isddistributorstate': 'ISD_DISTRIBUTOR_STATE',
-    'isddistributorpincode': 'ISD_DISTRIBUTOR_PINCODE',
-    'isddistributornumber': 'ISD_DISTRIBUTOR_NUMBER',
-    'creditrecipintgstin': 'CREDIT_RECIPIENT_GSTIN',
-    'creditrecipintname': 'CREDIT_RECIPIENT_NAME',
-    'creditrecipintaddress': 'CREDIT_RECIPIENT__ADDRESS',
-    'creditrecipintstate': 'CREDIT_RECIPIENT_STATE',  # Note double underscore
-    'creditrecipintpincode': 'CREDIT_RECIPIENT_PINCODE',
-    'creditrecipintnumber': 'CREDIT_RECIPIENT_NUMBER',
-    'amount': 'AMOUNT',
-    'regoffice': 'REG_OFFICE',
-    'cin': 'CIN',
-    'email': 'E_MAIL',  # Maps template's 'E-mail' to data's 'E_MAIL'
-    'website': 'WEBSITE',
-    'cgst': 'CGST',
-    'sgst': 'SGST',
-    'utgst': 'UTGST',
-    'igst': 'IGST'
-}
+class DataMapper:
+    def __init__(self, parent=None):
+        self.parent = parent
+        self.column_mapping = {
+            'invoicenumber': 'INVOICE_NUMBER',
+            'invoicedate': 'INVOICE_DATE',
+            'isddistributorgstin': 'ISD_DISTRIBUTOR_GSTIN',
+            'isddistributorname': 'ISD_DISTRIBUTOR_NAME',
+            'isddistributoraddress': 'ISD_DISTRIBUTOR_ADDRESS',
+            'isddistributorstate': 'ISD_DISTRIBUTOR_STATE',
+            'isddistributorpincode': 'ISD_DISTRIBUTOR_PINCODE',
+            'isddistributorstatecode': 'ISD_DISTRIBUTOR_STATE_CODE',
+            'creditrecipientgstin': 'CREDIT_RECIPIENT_GSTIN',
+            'creditrecipientname': 'CREDIT_RECIPIENT_NAME',
+            'creditrecipientaddress': 'CREDIT_RECIPIENT_ADDRESS',
+            'creditrecipientstate': 'CREDIT_RECIPIENT_STATE',
+            'creditrecipientpincode': 'CREDIT_RECIPIENT_PINCODE',
+            'creditrecipientstatecode': 'CREDIT_RECIPIENT_STATE_CODE',
+            'cgst': 'CGST',
+            'sgst': 'SGST',
+            'utgst': 'UTGST',
+            'igst': 'IGST',
+            'amount': 'AMOUNT',
+            'regoffice': 'REG_OFFICE',
+            'cin': 'CIN',
+            'email': 'E_MAIL',
+            'e-mail': 'E_MAIL',
+            'website': 'WEBSITE',
+            'amount_in_words': 'AMOUNT'
+        }
 
-def normalize_column_names(df: pd.DataFrame) -> pd.DataFrame:
-    """More flexible column name normalization"""
-    df.columns = [
-        col.strip()
-        .replace(' ', '_')
-        .replace('-', '_')
-        .upper()
-        for col in df.columns
-    ]
-    return df
+    def normalize_column_names(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Normalize column names to ensure consistent matching"""
+        df.columns = [
+            col.strip().upper().replace(' ', '_').replace('-', '_')
+            for col in df.columns
+        ]
+        return df
 
+    def map_data_to_docx(self, template_path: str, data: pd.DataFrame, output_folder: str) -> Optional[List[str]]:
+        """Main function to generate DOCX files from template and data"""
+        try:
+            if not self.validate_inputs(template_path, data, output_folder):
+                return None
 
-def map_data_to_docx(template_path: str, data: pd.DataFrame, output_folder: str) -> Optional[List[str]]:
-    """Generate one DOCX per data row with all placeholders filled"""
-    try:
+            os.makedirs(output_folder, exist_ok=True)
+            generated_files = []
+            template_placeholders = self.scan_template_placeholders(template_path)
+
+            logging.info(f"Template placeholders: {template_placeholders}")
+            logging.info(f"Data columns: {data.columns.tolist()}")
+
+            for idx, row in data.iterrows():
+                try:
+                    doc = Document(template_path)
+                    row_data = self.prepare_row_data(row, template_placeholders)
+
+                    # Debug output for first row
+                    if idx == 0:
+                        self.log_debug_info(row, template_placeholders, row_data)
+
+                    if not self.replace_all_placeholders(doc, row_data):
+                        logging.error(f"Skipping row {idx} due to replacement errors")
+                        continue
+
+                    output_path = self.generate_output_path(output_folder, row_data, idx)
+                    doc.save(output_path)
+                    generated_files.append(output_path)
+                    logging.info(f"Generated: {output_path}")
+
+                except Exception as e:
+                    logging.error(f"Error processing row {idx}: {str(e)}", exc_info=True)
+                    continue
+
+            return generated_files if generated_files else None
+
+        except Exception as e:
+            logging.error(f"Fatal error: {str(e)}", exc_info=True)
+            QMessageBox.critical(self.parent, "Error", f"Failed to generate documents: {str(e)}")
+            return None
+
+    def validate_inputs(self, template_path: str, data: pd.DataFrame, output_folder: str) -> bool:
+        """Validate all input parameters"""
         if not os.path.exists(template_path):
-            raise FileNotFoundError(f"Template not found: {template_path}")
+            QMessageBox.critical(self.parent, "Error", f"Template file not found: {template_path}")
+            return False
+
         if data.empty:
-            raise ValueError("No data provided")
+            QMessageBox.critical(self.parent, "Error", "No data provided in DataFrame")
+            return False
 
-        os.makedirs(output_folder, exist_ok=True)
-        generated_files = []
-        template_doc = Document(template_path)
+        try:
+            os.makedirs(output_folder, exist_ok=True)
+            return True
+        except Exception as e:
+            QMessageBox.critical(self.parent, "Error", f"Output folder not writable: {str(e)}")
+            return False
 
-        # Pre-process all placeholders in the template
-        template_placeholders = scan_template_placeholders(template_path)
-        logging.info(f"Found placeholders in template: {template_placeholders}")
+    def scan_template_placeholders(self, template_path: str) -> Set[str]:
+        """Extract all unique placeholders from a DOCX template"""
+        doc = Document(template_path)
+        placeholders = set()
+        placeholder_pattern = re.compile(r"\{\{\s*(.*?)\s*\}\}")  # Handles whitespace
 
-        # DEBUG: Print template placeholders and data columns
-        print("\n=== DEBUG INFORMATION ===")
-        print("Template placeholders:", template_placeholders)
-        print("Data columns:", data.columns.tolist())
-        print("First row data:", dict(data.iloc[0]))
-        print("=======================\n")
-        # After loading your data
-        print("Normalized columns:", [col.lower().replace('_', '') for col in data.columns])
-        print("Normalized placeholders:", [ph.lower().replace(' ', '') for ph in template_placeholders])
+        def extract_from_text(text: str):
+            return {match.strip() for match in placeholder_pattern.findall(text)}
 
-        for idx, row in data.iterrows():
-            try:
-                doc = deepcopy(template_doc)
-                row_data = prepare_row_data(row, template_placeholders)
+        # Process all document components
+        components = [
+            doc.paragraphs,
+            *[cell.paragraphs for table in doc.tables
+              for row in table.rows
+              for cell in row.cells],
+            *[section.header.paragraphs for section in doc.sections],
+            *[section.footer.paragraphs for section in doc.sections]
+        ]
 
-                # DEBUG: Print matched data for each row
-                print(f"\nProcessing row {idx}:")
-                print("Row data keys:", row.keys())
-                print("Matched data:", row_data)
+        for paragraphs in components:
+            for paragraph in paragraphs:
+                placeholders.update(extract_from_text(paragraph.text))
+                for run in paragraph.runs:
+                    placeholders.update(extract_from_text(run.text))
 
-                # Right after scanning template placeholders
-                print("\n=== PLACEHOLDER MAPPING ===")
-                for ph in template_placeholders:
-                    norm_ph = ph.lower().replace(' ', '').replace('.', '').replace('-', '')
-                    data_key = COLUMN_MAPPING.get(norm_ph, "NO MATCH")
-                    print(f"Template: {ph:25} → Data: {data_key}")
-                print("==========================\n")
+        return {ph for ph in placeholders if ph}  # Remove empty strings
 
-                # Process entire document structure
-                replace_all_placeholders(doc, row_data)
+    def prepare_row_data(self, row: pd.Series, template_placeholders: Set[str]) -> Dict[str, str]:
+        """Prepare complete row data with all required fields and proper formatting"""
+        row_data = {}
 
-                # Save output
-                output_path = generate_output_path(output_folder, row_data, idx)
-                doc.save(output_path)
-                generated_files.append(output_path)
-                logging.info(f"Generated: {output_path}")
+        # Process all placeholders in template
+        for ph in template_placeholders:
+            # Normalize the placeholder name
+            norm_ph = ph.lower().replace(' ', '').replace('.', '').replace('-', '')
 
-            except Exception as e:
-                logging.error(f"Row {idx + 1} error: {str(e)}")
+            # Special handling for amount_in_words
+            if norm_ph == 'amount_in_words':
+                try:
+                    amount = float(row['AMOUNT'])
+                    words = num2words(amount, lang='en_IN').title()
+                    # Ensure proper formatting
+                    words = words.replace('And', 'and')  # Fix capitalization
+                    row_data['amount_in_words'] = f"{words} Rupees Only"
+                except Exception as e:
+                    logging.error(f"Amount to words failed: {str(e)}")
+                    row_data['amount_in_words'] = ""
                 continue
 
-        return generated_files if generated_files else None
+            # Find matching column using our mapping
+            data_key = self.column_mapping.get(norm_ph)
 
-    except Exception as e:
-        logging.error(f"Fatal error: {str(e)}")
-        return None
+            if data_key and data_key in row:
+                value = row[data_key]
+                # Convert numpy types to native Python
+                if hasattr(value, 'item'):
+                    value = value.item()
+                row_data[ph] = self.format_value(value, ph)
+            else:
+                row_data[ph] = ""
+                logging.warning(f"No data mapping for placeholder: {ph} (normalized: {norm_ph})")
 
-def scan_template_placeholders(template_path: str) -> set:
-    """Find all unique placeholders in the template"""
-    doc = Document(template_path)
-    placeholders = set()
+        return row_data
 
-    def scan_text(text: str):
-        return {m.group(1) for m in re.finditer(r'\{\{(.*?)\}\}', text)}
-
-    # Scan paragraphs
-    for para in doc.paragraphs:
-        placeholders.update(scan_text(para.text))
-        for run in para.runs:
-            placeholders.update(scan_text(run.text))
-
-    # Scan tables
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for para in cell.paragraphs:
-                    placeholders.update(scan_text(para.text))
-                if cell.tables:  # Nested tables
-                    for nested_table in cell.tables:
-                        for nested_row in nested_table.rows:
-                            for nested_cell in nested_row.cells:
-                                for para in nested_cell.paragraphs:
-                                    placeholders.update(scan_text(para.text))
-
-    return placeholders
-
-
-def prepare_row_data(row: pd.Series, template_placeholders: set) -> dict:
-    """Enhanced version with better amount_in_words handling"""
-
-    row_data = {}
-
-    # Handle core fields first
-    core_fields = {
-        'Invoice Number': 'INVOICE_NUMBER',
-        'Invoice Date': 'INVOICE_DATE',
-        'CIN': 'CIN',
-        'Website': 'WEBSITE'
-    }
-
-    for ph, data_key in core_fields.items():
-        if ph in template_placeholders and data_key in row:
-            row_data[ph] = format_value(row[data_key], ph)
-
-    # Process amount_in_words first
-    if 'amount_in_words' in template_placeholders:
+    def replace_all_placeholders(self, doc: Document, row_data: Dict[str, str]) -> bool:
+        """Replace placeholders throughout document with formatting preservation"""
         try:
-            amount = float(row['AMOUNT'])
-            words = num2words(amount, lang='en_IN').title()
-            # Ensure proper formatting
-            words = words.replace('And', 'and')  # Fix capitalization
-            row_data['amount_in_words'] = f"{words} Rupees Only"
+            # Process all paragraphs in main document
+            for paragraph in doc.paragraphs:
+                self.replace_in_paragraph(paragraph, row_data)
+
+            # Process all tables
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for paragraph in cell.paragraphs:
+                            self.replace_in_paragraph(paragraph, row_data)
+
+            # Process headers and footers
+            for section in doc.sections:
+                for header in [section.header, section.first_page_header]:
+                    if header:
+                        for paragraph in header.paragraphs:
+                            self.replace_in_paragraph(paragraph, row_data)
+
+                for footer in [section.footer, section.first_page_footer]:
+                    if footer:
+                        for paragraph in footer.paragraphs:
+                            self.replace_in_paragraph(paragraph, row_data)
+
+            return True
+
         except Exception as e:
-            logging.error(f"Amount to words failed: {str(e)}")
-            row_data['amount_in_words'] = ""
+            logging.error(f"Error replacing placeholders: {str(e)}", exc_info=True)
+            return False
 
-    # Process other placeholders
-    for ph in template_placeholders:
-        if ph == 'amount_in_words':
-            continue  # Already handled
+    def replace_in_paragraph(self, paragraph, row_data: Dict[str, str]):
+        """Replace placeholders in a paragraph while preserving formatting"""
+        # First combine all runs to handle split placeholders
+        full_text = ''.join(run.text for run in paragraph.runs)
 
-        norm_ph = ph.lower().replace(' ', '').replace('.', '').replace('-', '')
-        data_key = COLUMN_MAPPING.get(norm_ph)
+        # Skip if no placeholders
+        if not any(f'{{{{{ph}}}}}' in full_text for ph in row_data):
+            return
 
-        if data_key and data_key in row:
-            value = row[data_key]
-            if hasattr(value, 'item'):  # Handle numpy types
-                value = value.item()
-            row_data[ph] = format_value(value, ph)
-        else:
-            row_data[ph] = ""
+        # Perform all replacements
+        modified_text = full_text
+        for ph, value in row_data.items():
+            modified_text = modified_text.replace(f'{{{{{ph}}}}}', value)
 
-    # Special handling for email
-    if 'E-mail' in template_placeholders and 'E_MAIL' in row:
-        row_data['E-mail'] = row['E_MAIL']
+        # Only update if changes were made
+        if modified_text != full_text:
+            # Clear existing content
+            paragraph.clear()
 
-    return row_data
+            # Add new content with preserved formatting
+            run = paragraph.add_run(modified_text)
+            run.font.size = Pt(10)
 
-def replace_all_placeholders(doc, row_data):
-    """Replace placeholders throughout entire document"""
-    # Process paragraphs
-    for paragraph in doc.paragraphs:
-        replace_in_paragraph(paragraph, row_data)
+            # Preserve other formatting from first run if available
+            if paragraph.runs and paragraph.runs[0].font.name:
+                run.font.name = paragraph.runs[0].font.name
 
-    # Process tables
-    for table in doc.tables:
-        process_table(table, row_data)
+    def format_value(self, value, key=None) -> str:
+        """Format values with special handling for certain fields"""
+        if pd.isna(value):
+            return ""
 
-    # Process headers and footers
-    for section in doc.sections:
-        for paragraph in section.header.paragraphs:
-            replace_in_paragraph(paragraph, row_data)
-        for paragraph in section.footer.paragraphs:
-            replace_in_paragraph(paragraph, row_data)
+        # Handle numpy types
+        if hasattr(value, 'item'):
+            value = value.item()
 
+        # Special formatting for amounts
+        if key and 'amount' in key.lower() and isinstance(value, (int, float)):
+            return "{:,.2f}".format(value)
 
-def process_table(table, row_data):
-    """Process tables with font size enforcement"""
-    from docx.shared import Pt
+        # Special handling for GSTIN (format with spaces)
+        if key and 'gstin' in key.lower() and isinstance(value, str) and len(value) == 15:
+            return f"{value[:2]} {value[2:5]} {value[5:7]} {value[7:12]} {value[12:15]}"
 
-    for row in table.rows:
-        for cell in row.cells:
-            # Process nested tables first
-            if cell.tables:
-                for nested_table in cell.tables:
-                    process_table(nested_table, row_data)
-
-            # Process cell content
-            for paragraph in cell.paragraphs:
-                replace_in_paragraph(paragraph, row_data)
-                # Enforce 10pt font for all runs
-                for run in paragraph.runs:
-                    run.font.size = Pt(10)
-
-
-def replace_in_paragraph(paragraph, row_data):
-    """Ensure complete text replacement with formatting"""
-    from docx.shared import Pt
-
-    # Combine all runs first to handle split placeholders
-    full_text = ''.join(run.text for run in paragraph.runs)
-    if not full_text.strip():
-        return
-
-    # Perform all replacements
-    for ph, value in row_data.items():
-        full_text = full_text.replace(f'{{{{{ph}}}}}', str(value))
-
-    # Clear and rebuild with original formatting
-    paragraph.clear()
-    run = paragraph.add_run(full_text)
-    run.font.size = Pt(10)  # Enforce 10pt font
-
-    # Preserve first run's formatting
-    if paragraph.runs:
-        first_run = paragraph.runs[0]
-        first_run.font.size = Pt(10)
-        if paragraph.runs[0].font.name:
-            first_run.font.name = paragraph.runs[0].font.name
-
-
-def format_value(value, key=None):
-    """Enhanced formatting to prevent truncation"""
-    if pd.isna(value):
-        return ""
-
-    # Handle numpy types
-    if hasattr(value, 'item'):
-        value = value.item()
-
-    # Special formatting for CIN
-    if key and key.upper() == 'CIN':
-        return str(value).strip()[:20]  # Limit to 20 chars but don't truncate mid-word
-
-    # Special formatting for website
-    if key and key.lower() == 'website':
         return str(value).strip()
 
-    # Default formatting
-    return str(value)
+    def generate_output_path(self, output_folder: str, row_data: dict, idx: int) -> str:
+        """Generate output path with invoice number if available"""
+        invoice_num = str(row_data.get('Invoice Number', idx + 1)).strip()
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return os.path.join(output_folder, f"ISD_Invoice_{invoice_num}_{timestamp}.docx")
 
-def generate_output_path(output_folder: str, row_data: dict, idx: int) -> str:
-    """Generate output path with invoice number if available"""
-    invoice_num = str(row_data.get('INVOICE_NUMBER', idx + 1)).strip().replace('/', '-')
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return os.path.join(output_folder, f"ISD_Invoice_{invoice_num}_{timestamp}.docx")
+    def log_debug_info(self, row, template_placeholders, row_data):
+        """Log debug information for the first row"""
+        logging.info("\n=== DEBUG INFORMATION ===")
+        logging.info(f"Template placeholders: {template_placeholders}")
+        logging.info(f"Data columns: {row.index.tolist()}")
+        logging.info(f"First row data: {dict(row)}")
+
+        logging.info("\n=== PLACEHOLDER MAPPING ===")
+        for ph in template_placeholders:
+            norm_ph = ph.lower().replace(' ', '').replace('.', '').replace('-', '')
+            data_key = self.column_mapping.get(norm_ph, "NO MATCH")
+            logging.info(f"Template: {ph:25} → Data: {data_key}")
+
+        logging.info("\n=== MATCHED DATA ===")
+        for ph, value in row_data.items():
+            logging.info(f"{ph:25}: {value}")
+        logging.info("=====================")

@@ -18,6 +18,7 @@ from docx import Document
 import json
 import logging
 
+
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -131,10 +132,20 @@ class MainApp(QMainWindow):
         self.fill_docx_btn.clicked.connect(self.fill_docx_template)
         self.layout.addWidget(self.fill_docx_btn)
 
-        # Initialize PDF preview
+        # Initialize PDF preview - REVISED SECTION
+        self.pdf_container = QWidget()
+        self.pdf_layout = QHBoxLayout(self.pdf_container)
+
         self.graphics_scene = QGraphicsScene()
         self.graphics_view = QGraphicsView(self.graphics_scene)
-        self.layout.addWidget(self.graphics_view)
+        self.pdf_layout.addWidget(self.graphics_view)
+
+        # Add right panel for controls
+        self.right_panel = QWidget()
+        self.right_layout = QVBoxLayout(self.right_panel)
+        self.pdf_layout.addWidget(self.right_panel)
+
+        self.layout.addWidget(self.pdf_container)
 
     def load_data(self):
         """Loads data from an Excel/CSV file."""
@@ -466,66 +477,47 @@ class MainApp(QMainWindow):
             page.insert_text((x, y), text)
         doc.save(output_path)
 
-    def upload_template(parent=None):
-        global template_file
-
-        # Set default paths
+    def upload_template(self):
+        """Handles DOCX template upload with validation"""
         docs_path = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
 
         try:
-            # Get file path with native dialog
             file_path, _ = QFileDialog.getOpenFileName(
-                parent,
+                self,
                 "Select DOCX Template",
                 docs_path,
                 "Word Documents (*.docx);;All Files (*)"
             )
 
             if not file_path:
-                logging.debug("User cancelled file selection")
                 return False
 
             # Validate file
             file_info = QFileInfo(file_path)
 
-            # 1. Check file exists
+            # Check file exists
             if not file_info.exists():
-                QMessageBox.critical(
-                    parent,
-                    "File Not Found",
-                    "The selected file does not exist."
-                )
+                QMessageBox.critical(self, "File Not Found", "The selected file does not exist.")
                 return False
 
-            # 2. Check file size (max 20MB)
+            # Check file size (max 20MB)
             max_size_mb = 20
             file_size_mb = file_info.size() / (1024 * 1024)
             if file_size_mb > max_size_mb:
-                QMessageBox.critical(
-                    parent,
-                    "File Too Large",
-                    f"File exceeds maximum size of {max_size_mb}MB"
-                )
+                QMessageBox.critical(self, "File Too Large", f"File exceeds maximum size of {max_size_mb}MB")
                 return False
 
-            # 3. Check read permissions
+            # Check read permissions
             if not file_info.isReadable():
-                QMessageBox.critical(
-                    parent,
-                    "Permission Denied",
-                    "You don't have permission to read this file."
-                )
+                QMessageBox.critical(self, "Permission Denied", "You don't have permission to read this file.")
                 return False
 
-            # 4. Validate DOCX structure
+            # Validate DOCX structure
             try:
+                from docx import Document
                 doc = Document(file_path)
                 if not doc.paragraphs and not doc.tables:
-                    QMessageBox.warning(
-                        parent,
-                        "Empty Document",
-                        "The document appears to be empty or corrupted."
-                    )
+                    QMessageBox.warning(self, "Empty Document", "The document appears to be empty or corrupted.")
                     return False
 
                 # Test saving a dummy version (checks for write permissions)
@@ -534,78 +526,63 @@ class MainApp(QMainWindow):
                 doc.save(temp_path)
                 os.remove(temp_path)
 
-            except PackageNotFoundError:
-                QMessageBox.critical(
-                    parent,
-                    "Invalid DOCX",
-                    "This is not a valid Word document (invalid package structure)."
-                )
-                return False
-            except Exception as e:
-                QMessageBox.critical(
-                    parent,
-                    "Document Error",
-                    f"Failed to process document: {str(e)}"
-                )
-                return False
+                self.docx_template_path = file_path
+                QMessageBox.information(self, "Success", "DOCX template loaded successfully!")
+                return True
 
-            # If we get here, file is valid
-            template_file = file_path
-            lbl_template.setText(f"📄 {file_info.fileName()} (Loaded)")
-            lbl_template.setToolTip(file_path)  # Show full path on hover
-            logging.info(f"Successfully loaded template: {file_path}")
-            return True
+            except Exception as e:
+                QMessageBox.critical(self, "Document Error", f"Failed to process document: {str(e)}")
+                return False
 
         except Exception as e:
-            logging.error(f"Unexpected error loading template: {str(e)}", exc_info=True)
-            QMessageBox.critical(
-                parent,
-                "Unexpected Error",
-                f"An unexpected error occurred:\n{str(e)}"
-            )
+            QMessageBox.critical(self, "Unexpected Error", f"An unexpected error occurred:\n{str(e)}")
             return False
 
     def fill_docx_template(self):
         """Fills the DOCX template with data from the DataFrame."""
-        if not self.template_file:
-            QMessageBox.critical(None, "Error", "No DOCX template uploaded!")
+        if not hasattr(self, 'docx_template_path') or not self.docx_template_path:
+            QMessageBox.critical(self, "Error", "No DOCX template uploaded!")
             return
 
         if self.df is None or self.df.empty:
-            QMessageBox.critical(None, "Error", "No data file uploaded!")
+            QMessageBox.critical(self, "Error", "No data loaded!")
             return
 
-        output_folder = QFileDialog.getExistingDirectory(None, "Select Output Folder")
+        output_folder = QFileDialog.getExistingDirectory(self, "Select Output Folder")
         if not output_folder:
             return
 
         try:
-            # Validate placeholders in the template
-            if not self.validate_docx_template():
-                QMessageBox.critical(None, "Error", "Template validation failed. Please check the placeholders.")
-                return
+            # Create a DataMapper instance
+            mapper = DataMapper(self)
 
-            # Process each row in the DataFrame
-            for idx, row in self.df.iterrows():
-                doc = Document(self.template_file)
+            # Process the documents
+            result = mapper.map_data_to_docx(
+                self.docx_template_path,
+                self.df,
+                output_folder
+            )
 
-                # Replace placeholders with data
-                for para in doc.paragraphs:
-                    for col in self.df.columns:
-                        placeholder = f"{{{{{col.strip()}}}}}"
-                        if placeholder in para.text:
-                            self.replace_placeholder_in_runs(para, placeholder, str(row[col]))
-
-                # Save the filled DOCX file
-                output_path = os.path.join(output_folder, f"Invoice_{idx + 1}.docx")
-                doc.save(output_path)
-                logging.info(f"✅ Saved: {output_path}")
-
-            QMessageBox.information(None, "Success", f"Filled DOCX files saved in {output_folder}")
+            if result:
+                QMessageBox.information(
+                    self,
+                    "Success",
+                    f"Successfully generated {len(result)} documents in:\n{output_folder}"
+                )
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Warning",
+                    "Documents were not generated. Please check the logs."
+                )
 
         except Exception as e:
-            logging.error(f"❌ Error filling DOCX template: {e}")
-            QMessageBox.critical(None, "Error", f"Failed to fill DOCX template: {e}")
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to generate documents:\n{str(e)}"
+            )
+            logging.error(f"Document generation failed: {str(e)}", exc_info=True)
 
     def validate_docx_template(self):
         """Validates that the DOCX template contains all required placeholders."""
