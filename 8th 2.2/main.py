@@ -1,104 +1,79 @@
+# main.py
 import sys
 import os
 import pandas as pd
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QFileDialog, QMessageBox, QLabel, QTableWidget, QTableWidgetItem, QLineEdit, QComboBox,
-    QDialog, QListWidget, QListWidgetItem, QFormLayout, QDialogButtonBox, QScrollArea, QGraphicsView, QGraphicsScene, QGraphicsRectItem
+    QFileDialog, QMessageBox, QLabel, QTableWidget, QTableWidgetItem, QLineEdit,
+    QComboBox, QDialog, QListWidget, QListWidgetItem, QFormLayout, QDialogButtonBox,
+    QScrollArea, QGraphicsView, QGraphicsScene, QGraphicsRectItem
 )
 from PyQt5.QtCore import Qt, QFileInfo, QStandardPaths
 from PyQt5.QtGui import QPixmap
 from fpdf import FPDF
-import pdfplumber
 import fitz
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
-from reportlab.lib import colors
-from docx import Document
 import json
 import logging
+from utils.data_mapper import DataMapper
 
-
-# Set up logging
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
-
 
 class MainApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Advanced Data Search & Export Tool 2.2")
         self.setGeometry(100, 100, 1200, 800)
+        self.init_data()
+        self.init_ui()
 
-        # Initialize variables
-        self.df = None  # DataFrame to store uploaded data
-        self.filtered_df = None  # DataFrame to store filtered data
-        self.pdf_path = None  # Path to the uploaded PDF
-        self.pdf_document = None  # PDF document object
-        self.base_name = "Invoice"  # Default base name for exported files
-        self.current_zoom = 1.0  # Zoom level for PDF preview
-        self.text_boxes = []  # List to store text boxes
-        self.box_data = []  # List to store box data
-        self.sort_orders = {}  # Dictionary to track column sorting order
-        self.docx_template_path = None  # Path to the uploaded DOCX template
-        self.image_path = None  # Path to the uploaded image
-        self.box_column_map = {}  # Dictionary to map boxes to columns
+    def init_data(self):
+        self.df = None
+        self.filtered_df = None
+        self.pdf_path = None
+        self.pdf_document = None
+        self.docx_template_path = None
+        self.image_path = None
+        self.box_column_map = {}
 
-        # Create the main widget and layout
+    def init_ui(self):
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.layout = QVBoxLayout(self.central_widget)
 
-        # Top Bar Layout
+        self.create_top_bar()
+        self.create_search_widgets()
+        self.create_data_table()
+        self.create_docx_controls()
+        self.create_pdf_preview()
+
+    def create_top_bar(self):
         self.top_bar_layout = QHBoxLayout()
         self.layout.addLayout(self.top_bar_layout)
 
-        # Add buttons to the top bar
-        self.load_button = QPushButton("Load Data")
-        self.top_bar_layout.addWidget(self.load_button)
-        self.load_button.clicked.connect(self.load_data)
+        buttons = [
+            ("Load Data", self.load_data),
+            ("Generate All Invoices", self.generate_all_invoices),
+            ("Create Invoice", self.create_invoice_dialog),
+            ("Load Image", self.load_image),
+            ("Add Box", self.add_box),
+            ("Save Structure", self.save_structure),
+            ("Load Structure", self.load_structure),
+            ("Export as CSV", lambda: self.export_data("csv")),
+            ("Export as Excel", lambda: self.export_data("xlsx")),
+            ("Export as PDF", lambda: self.export_data("pdf")),
+            ("📂 Upload DOCX Template", self.upload_template)
+        ]
 
-        self.generate_all_invoices_button = QPushButton("Generate All Invoices")
-        self.top_bar_layout.addWidget(self.generate_all_invoices_button)
-        self.generate_all_invoices_button.clicked.connect(self.generate_all_invoices)
+        for text, callback in buttons:
+            btn = QPushButton(text)
+            btn.clicked.connect(callback)
+            self.top_bar_layout.addWidget(btn)
 
-        self.invoice_button = QPushButton("Create Invoice")
-        self.top_bar_layout.addWidget(self.invoice_button)
-        self.invoice_button.clicked.connect(self.create_invoice_dialog)
-
-        self.load_image_button = QPushButton("Load Image")
-        self.top_bar_layout.addWidget(self.load_image_button)
-        self.load_image_button.clicked.connect(self.load_image)
-
-        self.add_box_button = QPushButton("Add Box")
-        self.top_bar_layout.addWidget(self.add_box_button)
-        self.add_box_button.clicked.connect(self.add_box)
-
-        self.save_structure_button = QPushButton("Save Structure")
-        self.top_bar_layout.addWidget(self.save_structure_button)
-        self.save_structure_button.clicked.connect(self.save_structure)
-
-        self.load_structure_button = QPushButton("Load Structure")
-        self.top_bar_layout.addWidget(self.load_structure_button)
-        self.load_structure_button.clicked.connect(self.load_structure)
-
-        self.export_csv_button = QPushButton("Export as CSV")
-        self.top_bar_layout.addWidget(self.export_csv_button)
-        self.export_csv_button.clicked.connect(lambda: self.export_data("csv"))
-
-        self.export_excel_button = QPushButton("Export as Excel")
-        self.top_bar_layout.addWidget(self.export_excel_button)
-        self.export_excel_button.clicked.connect(lambda: self.export_data("xlsx"))
-
-        self.export_pdf_button = QPushButton("Export as PDF")
-        self.top_bar_layout.addWidget(self.export_pdf_button)
-        self.export_pdf_button.clicked.connect(lambda: self.export_data("pdf"))
-
-        # Add a label for instructions
+    def create_search_widgets(self):
         self.label = QLabel("Load an Excel/CSV file to search, filter, and export data.")
         self.layout.addWidget(self.label)
 
-        # Add search and filter widgets
         self.search_layout = QHBoxLayout()
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search...")
@@ -118,21 +93,16 @@ class MainApp(QMainWindow):
 
         self.layout.addLayout(self.search_layout)
 
-        # Add a table to display the loaded data
+    def create_data_table(self):
         self.table = QTableWidget()
         self.layout.addWidget(self.table)
 
-        # DOCX Upload button
-        self.upload_docx_btn = QPushButton("📂 Upload DOCX Template")
-        self.upload_docx_btn.clicked.connect(self.upload_template)
-        self.top_bar_layout.addWidget(self.upload_docx_btn)
-
-        # Add a button to fill the DOCX template
+    def create_docx_controls(self):
         self.fill_docx_btn = QPushButton("📝 Fill DOCX Template")
         self.fill_docx_btn.clicked.connect(self.fill_docx_template)
         self.layout.addWidget(self.fill_docx_btn)
 
-        # Initialize PDF preview - REVISED SECTION
+    def create_pdf_preview(self):
         self.pdf_container = QWidget()
         self.pdf_layout = QHBoxLayout(self.pdf_container)
 
@@ -140,7 +110,6 @@ class MainApp(QMainWindow):
         self.graphics_view = QGraphicsView(self.graphics_scene)
         self.pdf_layout.addWidget(self.graphics_view)
 
-        # Add right panel for controls
         self.right_panel = QWidget()
         self.right_layout = QVBoxLayout(self.right_panel)
         self.pdf_layout.addWidget(self.right_panel)
@@ -148,7 +117,6 @@ class MainApp(QMainWindow):
         self.layout.addWidget(self.pdf_container)
 
     def load_data(self):
-        """Loads data from an Excel/CSV file."""
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Open File", "", "Excel/CSV Files (*.xlsx *.xls *.csv)"
         )
@@ -167,21 +135,17 @@ class MainApp(QMainWindow):
                 QMessageBox.warning(self, "Error", "The file is empty!")
                 return
 
-            # Update the filter column dropdown
             self.filter_column.clear()
             self.filter_column.addItem("All Columns")
             self.filter_column.addItems(self.df.columns.tolist())
 
-            # Display the data in the table
             self.display_data_in_table(self.df)
-
             QMessageBox.information(self, "Success", f"Loaded {len(self.df)} records!")
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load file: {e}")
 
     def display_data_in_table(self, data):
-        """Displays the loaded data in the table widget."""
         self.table.setRowCount(data.shape[0])
         self.table.setColumnCount(data.shape[1])
         self.table.setHorizontalHeaderLabels(data.columns)
@@ -191,7 +155,6 @@ class MainApp(QMainWindow):
                 self.table.setItem(i, j, QTableWidgetItem(str(data.iat[i, j])))
 
     def perform_search(self):
-        """Performs a search on the loaded data."""
         if self.df is None:
             QMessageBox.warning(self, "Error", "No data loaded!")
             return
@@ -204,11 +167,9 @@ class MainApp(QMainWindow):
             self.display_data_in_table(self.df)
             return
 
-        # Handle comma-separated sub-queries
         sub_queries = [q.strip() for q in search_query.split(',')]
         filtered_data = self.df.copy()
 
-        # Apply queries in priority order
         for q in sub_queries:
             if filter_column == "All Columns":
                 filtered_data = filtered_data[
@@ -231,7 +192,6 @@ class MainApp(QMainWindow):
         self.display_data_in_table(self.filtered_df)
 
     def export_data(self, format):
-        """Exports the filtered data to the specified format."""
         if self.filtered_df is None or self.filtered_df.empty:
             QMessageBox.warning(self, "Error", "No filtered data to export!")
             return
@@ -257,34 +217,28 @@ class MainApp(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to export data: {e}")
 
     def save_df_as_pdf(self, df, save_path):
-        """Saves the DataFrame as a PDF."""
         pdf = FPDF()
         pdf.set_auto_page_break(auto=True, margin=15)
         pdf.add_page()
 
-        # Add title
         pdf.set_font("Arial", "B", 16)
         pdf.cell(200, 10, "Exported Data", ln=True, align='C')
 
-        # Add table headers
         pdf.set_font("Arial", "B", 12)
         for col in df.columns:
             pdf.cell(40, 10, col, 1)
         pdf.ln()
 
-        # Add table data
         pdf.set_font("Arial", size=12)
         for _, row in df.iterrows():
             for col in df.columns:
                 pdf.cell(40, 10, str(row[col]), 1)
             pdf.ln()
 
-        # Save the PDF
         pdf.output(save_path)
-        print(f"✅ PDF saved: {save_path}")
+        logger.info(f"PDF saved: {save_path}")
 
     def create_invoice_dialog(self):
-        """Opens a dialog to create an invoice."""
         if self.df is None:
             QMessageBox.warning(self, "Error", "No data loaded!")
             return
@@ -293,7 +247,6 @@ class MainApp(QMainWindow):
         dialog.setWindowTitle("Create Invoice")
         layout = QVBoxLayout(dialog)
 
-        # Select Columns
         columns_label = QLabel("Select Columns:")
         layout.addWidget(columns_label)
         columns_list = QListWidget()
@@ -303,7 +256,6 @@ class MainApp(QMainWindow):
             columns_list.addItem(item)
         layout.addWidget(columns_list)
 
-        # Invoice Details
         details_label = QLabel("Invoice Details:")
         layout.addWidget(details_label)
         form_layout = QFormLayout()
@@ -315,7 +267,6 @@ class MainApp(QMainWindow):
         form_layout.addRow("Invoice Date:", invoice_date)
         layout.addLayout(form_layout)
 
-        # Buttons
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         button_box.accepted.connect(dialog.accept)
         button_box.rejected.connect(dialog.reject)
@@ -324,7 +275,6 @@ class MainApp(QMainWindow):
         dialog.exec_()
 
     def generate_all_invoices(self):
-        """Generates a separate invoice for each row in the DataFrame."""
         if self.df is None:
             QMessageBox.warning(self, "Error", "No data loaded!")
             return
@@ -334,74 +284,54 @@ class MainApp(QMainWindow):
             return
 
         for index, row in self.df.iterrows():
-            invoice_number = str(row.get("Invoice Number", f"INV-{index + 1}"))  # Get invoice number or create one
-            customer_name = str(row.get("Customer Name", f"Customer {index + 1}"))  # Get customer name or create one
-            invoice_date = str(row.get("Invoice Date", "N/A"))  # Get invoice date or set to N/A
+            invoice_number = str(row.get("Invoice Number", f"INV-{index + 1}"))
+            customer_name = str(row.get("Customer Name", f"Customer {index + 1}"))
+            invoice_date = str(row.get("Invoice Date", "N/A"))
 
-            # Create a temporary DataFrame with only the current row
-            temp_df = pd.DataFrame([row])
-
-            # Generate the invoice
             pdf = FPDF()
             pdf.add_page()
             pdf.set_font("Arial", size=12)
 
-            # Invoice Header
             pdf.set_font("Arial", "B", 16)
             pdf.cell(0, 10, "Invoice", ln=True, align='C')
             pdf.set_font("Arial", size=12)
 
-            # Customer Information
-            address_columns = ["Address", "City", "Zip"]  # Example address columns
+            address_columns = ["Address", "City", "Zip"]
             if address_columns:
                 pdf.cell(0, 10, "Customer Information:", ln=True)
                 address_text = ""
                 for col in address_columns:
-                    if col in temp_df.columns:
-                        address_text += f"{col}: {temp_df.iloc[0][col]}\n"
+                    if col in row:
+                        address_text += f"{col}: {row[col]}\n"
                 pdf.multi_cell(0, 10, address_text)
 
-            # Invoice Details
             pdf.cell(0, 10, f"Invoice Number: {invoice_number}", ln=True)
             pdf.cell(0, 10, f"Customer Name: {customer_name}", ln=True)
             pdf.cell(0, 10, f"Invoice Date: {invoice_date}", ln=True)
             pdf.ln(10)
 
-            # Table Headers
             pdf.set_font("Arial", "B", 12)
             for col in self.df.columns:
                 pdf.cell(40, 10, col, 1)
             pdf.ln()
 
-            # Table Data
             pdf.set_font("Arial", size=12)
             for col in self.df.columns:
                 pdf.cell(40, 10, str(row[col]), 1)
             pdf.ln()
 
-            # Other Sections
-            other_sections = [{"title": "Notes", "column": "Notes"}]  # Example other sections
-            if other_sections:
-                pdf.ln(10)
-                for section in other_sections:
-                    if section["column"] in temp_df.columns:
-                        pdf.cell(0, 10, f"{section['title']}: {temp_df.iloc[0][section['column']]}", ln=True)
-
-            # Save the PDF
             file_path = os.path.join(output_folder, f"Invoice_{index + 1}.pdf")
             pdf.output(file_path)
 
         QMessageBox.information(self, "Success", f"{len(self.df)} invoices generated successfully!")
 
     def load_image(self):
-        """Loads an image for the PDF preview."""
         file_path, _ = QFileDialog.getOpenFileName(self, "Open Image", "", "Image Files (*.png *.jpg *.jpeg)")
         if file_path:
             self.image_path = file_path
             self.create_pdf_preview()
 
     def create_pdf_preview(self):
-        """Creates a PDF preview with the loaded image."""
         if self.image_path:
             pixmap = QPixmap(self.image_path)
             self.pdf_label = QLabel()
@@ -420,7 +350,10 @@ class MainApp(QMainWindow):
                 self.layout.addWidget(dropdown)
 
     def add_box(self):
-        """Adds a resizable box and column selection dropdown."""
+        if self.df is None:
+            QMessageBox.warning(self, "Error", "No data loaded!")
+            return
+
         rect = QGraphicsRectItem(100, 100, 200, 50)
         self.graphics_scene.addItem(rect)
         column_dropdown = QComboBox()
@@ -429,7 +362,6 @@ class MainApp(QMainWindow):
         self.box_column_map[rect] = column_dropdown
 
     def save_structure(self):
-        """Saves the structure of boxes and columns to a JSON file."""
         structure = []
         for rect, dropdown in self.box_column_map.items():
             structure.append({
@@ -445,7 +377,6 @@ class MainApp(QMainWindow):
                 json.dump(structure, f)
 
     def load_structure(self):
-        """Loads the structure of boxes and columns from a JSON file."""
         file_path, _ = QFileDialog.getOpenFileName(self, "Load Structure", "", "JSON Files (*.json)")
         if file_path:
             with open(file_path, 'r') as f:
@@ -463,8 +394,7 @@ class MainApp(QMainWindow):
             self.create_pdf_preview()
 
     def generate_pdf_with_boxes(self, output_path):
-        """Generates a PDF with boxes and text."""
-        doc = fitz.open()  # Create empty PDF
+        doc = fitz.open()
         page = doc.new_page()
         if self.image_path:
             rect = page.rect
@@ -478,7 +408,6 @@ class MainApp(QMainWindow):
         doc.save(output_path)
 
     def upload_template(self):
-        """Handles DOCX template upload with validation"""
         docs_path = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
 
         try:
@@ -492,35 +421,28 @@ class MainApp(QMainWindow):
             if not file_path:
                 return False
 
-            # Validate file
             file_info = QFileInfo(file_path)
 
-            # Check file exists
             if not file_info.exists():
                 QMessageBox.critical(self, "File Not Found", "The selected file does not exist.")
                 return False
 
-            # Check file size (max 20MB)
             max_size_mb = 20
             file_size_mb = file_info.size() / (1024 * 1024)
             if file_size_mb > max_size_mb:
                 QMessageBox.critical(self, "File Too Large", f"File exceeds maximum size of {max_size_mb}MB")
                 return False
 
-            # Check read permissions
             if not file_info.isReadable():
                 QMessageBox.critical(self, "Permission Denied", "You don't have permission to read this file.")
                 return False
 
-            # Validate DOCX structure
             try:
-                from docx import Document
                 doc = Document(file_path)
                 if not doc.paragraphs and not doc.tables:
                     QMessageBox.warning(self, "Empty Document", "The document appears to be empty or corrupted.")
                     return False
 
-                # Test saving a dummy version (checks for write permissions)
                 temp_path = os.path.join(QStandardPaths.writableLocation(
                     QStandardPaths.TempLocation), "temp_validation.docx")
                 doc.save(temp_path)
@@ -539,7 +461,6 @@ class MainApp(QMainWindow):
             return False
 
     def fill_docx_template(self):
-        """Fills the DOCX template with data from the DataFrame."""
         if not hasattr(self, 'docx_template_path') or not self.docx_template_path:
             QMessageBox.critical(self, "Error", "No DOCX template uploaded!")
             return
@@ -553,10 +474,7 @@ class MainApp(QMainWindow):
             return
 
         try:
-            # Create a DataMapper instance
             mapper = DataMapper(self)
-
-            # Process the documents
             result = mapper.map_data_to_docx(
                 self.docx_template_path,
                 self.df,
@@ -582,38 +500,7 @@ class MainApp(QMainWindow):
                 "Error",
                 f"Failed to generate documents:\n{str(e)}"
             )
-            logging.error(f"Document generation failed: {str(e)}", exc_info=True)
-
-    def validate_docx_template(self):
-        """Validates that the DOCX template contains all required placeholders."""
-        try:
-            doc = Document(self.docx_template_path)
-            placeholders_found = set()
-
-            for para in doc.paragraphs:
-                for col in self.df.columns:
-                    placeholder = f"{{{{{col.strip()}}}}}"
-                    if placeholder in para.text:
-                        placeholders_found.add(col)
-
-            # Check if all placeholders are found
-            missing_placeholders = set(self.df.columns) - placeholders_found
-            if missing_placeholders:
-                logger.error(f"❌ Missing placeholders in template: {missing_placeholders}")
-                return False
-
-            return True
-
-        except Exception as e:
-            logger.error(f"❌ Error validating template: {e}")
-            return False
-
-    def replace_placeholder_in_runs(self, paragraph, placeholder, replacement):
-        """Replaces placeholders in a paragraph while preserving formatting."""
-        for run in paragraph.runs:
-            if placeholder in run.text:
-                run.text = run.text.replace(placeholder, replacement)
-
+            logger.error(f"Document generation failed: {str(e)}", exc_info=True)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
