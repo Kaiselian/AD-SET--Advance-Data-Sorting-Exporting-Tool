@@ -16,7 +16,7 @@ This is a **Tkinter-based GUI application** that allows users to **upload, filte
 ### **Installation & Setup**  
 1. Clone the repository:  
    ```bash
-   git clone https://github.com/your-username/advanced-data-search-tool.git
+   git clone https://github.com/Kaiselian/AD-SET--Advance-Data-Sorting-Exporting-Tool
    cd advanced-data-search-tool
    ```  
 2. Install dependencies:  
