@@ -108,6 +108,21 @@ class DocumentFillerApp:
         # Create the treeview
         self.tree = self.create_treeview(preview_frame)
 
+    def has_tax_amounts(self, row, is_eligible):
+        """Check if row has any tax amounts for the given type (eligible/ineligible)"""
+        prefix = "ELIGIBLE_" if is_eligible else "INELIGIBLE_"
+        tax_fields = ['CGST', 'SGST', 'UTGST', 'IGST']
+
+        for tax in tax_fields:
+            col_name = prefix + tax
+            if col_name in row and pd.notna(row[col_name]):
+                try:
+                    if float(row[col_name]) > 0:
+                        return True
+                except (ValueError, TypeError):
+                    continue
+        return False
+
     def start_processing(self):
         """Start the document generation process"""
         if not all([self.input_file, self.output_folder]):
@@ -131,37 +146,49 @@ class DocumentFillerApp:
 
             for idx, row in data.iterrows():
                 try:
-                    # Determine template type
-                    is_eligible = self.is_row_eligible(row)
-                    template_path = self.eligible_template if is_eligible else self.ineligible_template
-                    prefix = "Eligible" if is_eligible else "Ineligible"
+                    logging.info(f"\nProcessing row {idx}:")
+                    logging.info(
+                        f"Eligible amounts - CGST: {row['ELIGIBLE_CGST']}, SGST: {row['ELIGIBLE_SGST']}, IGST: {row['ELIGIBLE_IGST']}")
+                    logging.info(
+                        f"Ineligible amounts - CGST: {row['INELIGIBLE_CGST']}, SGST: {row['INELIGIBLE_SGST']}, IGST: {row['INELIGIBLE_IGST']}")
 
-                    # Generate document
-                    doc = Document(template_path)
-                    placeholders = scan_template_placeholders(template_path)
-                    row_data = prepare_row_data(row, placeholders, is_eligible)
+                    # Process both eligible and ineligible documents for each row
+                    for is_eligible in [True, False]:
+                        # Get the appropriate template path
+                        template_path = self.eligible_template if is_eligible else self.ineligible_template
+                        prefix = "Eligible" if is_eligible else "Ineligible"
 
-                    if not replace_all_placeholders(doc, row_data):
-                        logging.error(f"Skipping row {idx} due to replacement errors")
-                        continue
+                        # Skip if no amounts for this type
+                        if not self.has_tax_amounts(row, is_eligible):
+                            logging.info(f"No {'eligible' if is_eligible else 'ineligible'} amounts found")
+                            continue
 
-                    # Save temporary DOCX
-                    invoice_num = str(row.get('INVOICE_NUMBER', idx + 1)).strip()
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    docx_filename = f"{prefix}_ISD_{invoice_num}_{timestamp}.docx"
-                    docx_path = os.path.join(temp_docx_folder, docx_filename)
-                    doc.save(docx_path)
+                        # Generate document
+                        doc = Document(template_path)
+                        placeholders = scan_template_placeholders(template_path)
+                        row_data = prepare_row_data(row, placeholders, is_eligible)
 
-                    # Convert to PDF
-                    pdf_filename = f"{prefix}_ISD_{invoice_num}_{timestamp}.pdf"
-                    pdf_path = os.path.join(pdf_output_folder, pdf_filename)
-                    convert(docx_path, pdf_path)
+                        if not replace_all_placeholders(doc, row_data):
+                            logging.error(f"Skipping row {idx} due to replacement errors")
+                            continue
 
-                    # Delete temporary DOCX
-                    os.remove(docx_path)
+                        # Save temporary DOCX
+                        invoice_num = str(row.get('INVOICE_NUMBER', idx + 1)).strip()
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        docx_filename = f"{prefix}_ISD_{invoice_num}_{timestamp}.docx"
+                        docx_path = os.path.join(temp_docx_folder, docx_filename)
+                        doc.save(docx_path)
 
-                    success_count += 1
-                    logging.info(f"Generated {pdf_filename}")
+                        # Convert to PDF
+                        pdf_filename = f"{prefix}_ISD_{invoice_num}_{timestamp}.pdf"
+                        pdf_path = os.path.join(pdf_output_folder, pdf_filename)
+                        convert(docx_path, pdf_path)
+
+                        # Delete temporary DOCX immediately after PDF conversion
+                        os.remove(docx_path)
+
+                        success_count += 1
+                        logging.info(f"Generated {pdf_filename}")
 
                 except Exception as e:
                     logging.error(f"Error processing row {idx}: {str(e)}", exc_info=True)

@@ -35,14 +35,14 @@ COLUMN_MAPPING = {
     'creditrecipientstatecode': 'CREDIT_RECIPIENT_STATE_CODE',
 
     # Tax fields - Handle both eligible and ineligible
-    'eligiblecgst': 'ELIGIBLE_CGST',
-    'eligiblesgst': 'ELIGIBLE_SGST',
-    'eligibleutgst': 'ELIGIBLE_UTGST',
-    'eligibleigst': 'ELIGIBLE_IGST',
-    'ineligiblecgst': 'INELIGIBLE_CGST',
-    'ineligiblesgst': 'INELIGIBLE_SGST',
-    'ineligibleutgst': 'INELIGIBLE_UTGST',
-    'ineligibleigst': 'INELIGIBLE_IGST',
+    'eligible cgst': 'ELIGIBLE_CGST',
+    'eligible sgst': 'ELIGIBLE_SGST',
+    'eligible utgst': 'ELIGIBLE_UTGST',
+    'eligible igst': 'ELIGIBLE_IGST',
+    'ineligible cgst': 'INELIGIBLE_CGST',
+    'ineligible sgst': 'INELIGIBLE_SGST',
+    'ineligible utgst': 'INELIGIBLE_UTGST',
+    'ineligible igst': 'INELIGIBLE_IGST',
     'cgst': 'CGST',  # Fallback
     'sgst': 'SGST',  # Fallback
     'utgst': 'UTGST',  # Fallback
@@ -55,7 +55,6 @@ COLUMN_MAPPING = {
     # Contact fields
     'regoffice': 'REG_OFFICE',
     'cin': 'CIN',
-    'email': 'E_MAIL',
     'e-mail': 'E_MAIL',
     'website': 'WEBSITE',
 
@@ -143,67 +142,84 @@ def validate_inputs(template_path: str, data: pd.DataFrame, output_folder: str) 
         return False
 
 
-def prepare_row_data(row: pd.Series, template_placeholders: Set[str],
-                     is_eligible: bool = True) -> Dict[str, str]:
-    """
-    Prepare complete row data with proper tax field selection and formatting
-    Args:
-        row: DataFrame row containing the data
-        template_placeholders: Set of placeholders found in the template
-        is_eligible: Boolean indicating whether to use eligible tax values
-    """
+def prepare_row_data(row, template_placeholders, is_eligible):
     row_data = {}
     prefix = "ELIGIBLE_" if is_eligible else "INELIGIBLE_"
 
-    # Process tax fields with proper prefix
+    # Process tax fields
     tax_types = ['CGST', 'SGST', 'UTGST', 'IGST']
     for tax in tax_types:
         col_name = prefix + tax
-        alt_col_name = col_name.replace('_', '')  # Handle columns without underscore
-
-        # Try both column name formats
-        value = 0
-        if col_name in row:
-            value = safe_float_conversion(row[col_name])
-        elif alt_col_name in row:
-            value = safe_float_conversion(row[alt_col_name])
-
+        value = safe_float_conversion(row[col_name]) if col_name in row else 0
         row_data[tax] = format_value(value, tax)
 
-    # Calculate total amount from the selected tax values
+    # Calculate total amount
     total_amount = sum(float(row_data.get(tax, 0)) for tax in tax_types)
-    row_data['AMOUNT'] = format_value(total_amount, 'AMOUNT')
+    row_data['Amount'] = format_value(total_amount, 'Amount')
 
-    # Process amount in words if placeholder exists
+    # Process amount in words
     if any('amount_in_words' in ph.lower() for ph in template_placeholders):
         try:
             words = num2words(total_amount, lang='en_IN').title()
-            words = words.replace('And', 'and')  # Fix capitalization
-            row_data['AMOUNT_IN_WORDS'] = f"{words} Rupees Only"
+            words = words.replace('And', 'and')
+            row_data['amount_in_words'] = f"{words} Rupees Only"
         except Exception as e:
             logging.error(f"Amount to words conversion failed: {str(e)}")
-            row_data['AMOUNT_IN_WORDS'] = ""
+            row_data['amount_in_words'] = ""
 
-    # Process all other placeholders
-    for ph in template_placeholders:
-        if ph in row_data:  # Skip already processed fields
-            continue
+    # Map other fields
+    field_mapping = {
+        # Invoice fields
+    'Invoice Number': 'INVOICE_NUMBER',
+    'Invoice Date': 'INVOICE_DATE',
 
-        # Normalize placeholder name for matching
-        norm_ph = ph.lower().replace(' ', '').replace('-', '').replace('_', '').replace('.', '')
+    # ISD Distributor fields
+    'ISD Distributor GSTIN': 'ISD_DISTRIBUTOR_GSTIN',
+    'ISD Distributor Name': 'ISD_DISTRIBUTOR_NAME',
+    'ISD Distributor Address': 'ISD_DISTRIBUTOR_ADDRESS',
+    'ISD Distributor State': 'ISD_DISTRIBUTOR_STATE',
+    'ISD Distributor Pincode': 'ISD_DISTRIBUTOR_PINCODE',
+    'ISD Distributor State Code': 'ISD_DISTRIBUTOR_STATE_CODE',
 
-        # Find matching column using our mapping
-        data_key = COLUMN_MAPPING.get(norm_ph)
+    # Credit Recipient fields
+    'Credit Recipient GSTIN': 'CREDIT_RECIPIENT_GSTIN',
+    'Credit Recipient Name': 'CREDIT_RECIPIENT_NAME',
+    'Credit Recipient Address': 'CREDIT_RECIPIENT_ADDRESS',
+    'Credit Recipient State': 'CREDIT_RECIPIENT_STATE',
+    'Credit Recipient Pincode': 'CREDIT_RECIPIENT_PINCODE',
+    'Credit Recipient State Code': 'CREDIT_RECIPIENT_STATE_CODE',
 
-        if data_key and data_key in row:
-            value = row[data_key]
-            # Convert numpy types to native Python
-            if hasattr(value, 'item'):
-                value = value.item()
-            row_data[ph] = format_value(value, ph)
-        else:
-            logging.warning(f"No data mapping for placeholder: {ph} (normalized: {norm_ph})")
-            row_data[ph] = ""
+    # Tax fields - Handle both eligible and ineligible
+    'Eligible cgst': 'ELIGIBLE_CGST',
+    'Eligible sgst': 'ELIGIBLE_SGST',
+    'Eligible utgst': 'ELIGIBLE_UTGST',
+    'Eligible igst': 'ELIGIBLE_IGST',
+    'Ineligible cgst': 'INELIGIBLE_CGST',
+    'Ineligible sgst': 'INELIGIBLE_SGST',
+    'Ineligible utgst': 'INELIGIBLE_UTGST',
+    'Ineligible igst': 'INELIGIBLE_IGST',
+    'cgst': 'CGST',  # Fallback
+    'sgst': 'SGST',  # Fallback
+    'utgst': 'UTGST',  # Fallback
+    'igst': 'IGST',  # Fallback
+
+    # Amount fields
+    'Amount': 'AMOUNT',
+    'Total': 'AMOUNT',
+
+    # Contact fields
+    'Reg. Office': 'REG_OFFICE',
+    'CIN': 'CIN',
+    'E-Mail': 'E_MAIL',
+    'Website': 'WEBSITE',
+
+    # Special fields
+    'amount_in_words': 'AMOUNT_IN_WORDS'
+    }
+
+    for template_ph, data_col in field_mapping.items():
+        if template_ph in template_placeholders:
+            row_data[template_ph] = format_value(row.get(data_col, ''), template_ph)
 
     return row_data
 

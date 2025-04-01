@@ -7,15 +7,6 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 
 def read_excel_csv(file_path: str) -> Optional[pd.DataFrame]:
-    """
-    Reads Excel or CSV file into a pandas DataFrame with robust error handling.
-
-    Args:
-        file_path: Path to the input file (Excel or CSV)
-
-    Returns:
-        pandas DataFrame if successful, None otherwise
-    """
     try:
         if not os.path.exists(file_path):
             logging.error(f"File not found: {file_path}")
@@ -24,17 +15,36 @@ def read_excel_csv(file_path: str) -> Optional[pd.DataFrame]:
         file_ext = os.path.splitext(file_path)[1].lower()
 
         if file_ext in ['.xlsx', '.xls']:
-            # Read Excel with formula evaluation and proper dtype handling
+            # Read the second row to get tax type labels
+            header_df = pd.read_excel(file_path, header=None, nrows=2)
+            tax_labels = header_df.iloc[1, 14:22].tolist()  # Columns O to V
+
+            # Read data with proper column names
             df = pd.read_excel(
                 file_path,
                 engine='openpyxl',
-                dtype=str,  # Read all as string to preserve formatting
+                header=0,
+                skiprows=[1],  # Skip the tax type labels row
+                names=[
+                    'INVOICE_NUMBER', 'INVOICE_DATE', 'ISD_DISTRIBUTOR_GSTIN',
+                    'ISD_DISTRIBUTOR_NAME', 'ISD_DISTRIBUTOR_ADDRESS',
+                    'ISD_DISTRIBUTOR_STATE', 'ISD_DISTRIBUTOR_PINCODE',
+                    'ISD_DISTRIBUTOR_STATE_CODE', 'CREDIT_RECIPIENT_GSTIN',
+                    'CREDIT_RECIPIENT_NAME', 'CREDIT_RECIPIENT_ADDRESS',
+                    'CREDIT_RECIPIENT_STATE', 'CREDIT_RECIPIENT_PINCODE',
+                    'CREDIT_RECIPIENT_STATE_CODE',
+                    'ELIGIBLE_CGST', 'ELIGIBLE_SGST', 'ELIGIBLE_UTGST', 'ELIGIBLE_IGST',
+                    'INELIGIBLE_CGST', 'INELIGIBLE_SGST', 'INELIGIBLE_UTGST', 'INELIGIBLE_IGST',
+                    'AMOUNT', 'REG_OFFICE', 'CIN', 'E_MAIL', 'WEBSITE'
+                ],
+                dtype=str,
                 na_values=['', 'NA', 'N/A', 'NULL'],
                 keep_default_na=False
             )
             logging.info(f"Successfully loaded Excel file: {file_path}")
 
         elif file_ext == '.csv':
+            # Existing CSV handling
             # Read CSV with flexible parsing
             df = pd.read_csv(
                 file_path,
