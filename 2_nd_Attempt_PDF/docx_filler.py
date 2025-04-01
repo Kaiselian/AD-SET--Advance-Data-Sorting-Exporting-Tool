@@ -5,7 +5,8 @@ from docx import Document
 import pandas as pd
 from docx.shared import Pt
 from typing import Dict, List, Optional
-from num2words import num2words  # For amount-to-words conversion
+from num2words import num2words
+from data_mapper import prepare_row_data
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
@@ -88,14 +89,14 @@ def convert_amount_to_words(amount: float) -> str:
             return ""
 
         # Split into dollars and cents
-        dollars = int(amount)
-        cents = round((amount - dollars) * 100)
+        rupees = int(amount)
+        paise = round((amount - rupees) * 100)
 
         dollar_words = num2words(dollars, lang='en').title()
 
         if cents > 0:
             cent_words = num2words(cents, lang='en').title()
-            return f"{dollar_words} And {cent_words} Cents"
+            return f"{dollar_words} And {cent_words} Paise"
         return f"{dollar_words} Only"
 
     except Exception as e:

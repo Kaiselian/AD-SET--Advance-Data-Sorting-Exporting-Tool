@@ -1,181 +1,305 @@
 import tkinter as tk
-import pandas
-from tkinter import filedialog, messagebox
+import pandas as pd
+from tkinter import filedialog, messagebox, ttk
 import ttkbootstrap as tb
 import os
 import logging
+import darkdetect
+import sys
+from datetime import datetime
+from docx import Document
 from file_reader import read_excel_csv
-from docx_filler import fill_docx_template
-from pdf_generator import merge_pdfs
-from data_mapper import map_data_to_docx
+from data_mapper import scan_template_placeholders, prepare_row_data, replace_all_placeholders
 from docx2pdf import convert
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
-# Initialize GUI
-root = tb.Window(themename="journal")
-root.title("Automated Document Filler")
-root.geometry("1000x600")
 
-# Global Variables
-input_file = None
-template_file = None
-output_folder = None
+class DocumentFillerApp:
+    def __init__(self, root):
+        self.root = root
+        self.load_default_templates()  # Load templates first
+        self.setup_ui()
+        self.setup_menu()
 
-# 🟢 Load Excel/CSV File
-def upload_data_file():
-    global input_file
-    file_path = filedialog.askopenfilename(filetypes=[("Excel/CSV files", "*.xlsx;*.xls;*.csv")])
-    if file_path:
-        input_file = file_path
-        lbl_data.config(text=f"📂 {os.path.basename(file_path)} Loaded")
-        logging.info(f"Data file loaded: {file_path}")
-        messagebox.showinfo("Success", "Data file loaded successfully!")
+        # Initialize variables
+        self.input_file = None
+        self.output_folder = None
+        self.current_data = None
 
-# 🟢 Load DOCX Template
-def upload_template():
-    global template_file
-    file_path = filedialog.askopenfilename(filetypes=[("Word Documents", "*.docx")])
-    if file_path:
-        template_file = file_path
-        lbl_template.config(text=f"📄 {os.path.basename(file_path)} Loaded")
-        logging.info(f"Template file loaded: {file_path}")
-        messagebox.showinfo("Success", "Template loaded successfully!")
+    def load_default_templates(self):
+        """Load default templates from the templates folder"""
+        try:
+            # Get the directory where the executable or script is located
+            if getattr(sys, 'frozen', False):
+                # Running as compiled executable
+                application_path = os.path.dirname(sys.executable)
+            else:
+                # Running as script
+                application_path = os.path.dirname(os.path.abspath(__file__))
 
-# 🟢 Select Output Folder
-def select_output_folder():
-    global output_folder
-    folder = filedialog.askdirectory()
-    if folder:
-        output_folder = folder
-        lbl_output.config(text=f"📁 Output Folder: {folder}")
-        logging.info(f"Output folder selected: {folder}")
+            templates_dir = os.path.join(application_path, "templates")
 
-# 🟢 Start Automated Processing
-def start_processing():
-    if not all([input_file, template_file, output_folder]):
-        messagebox.showerror("Error", "Please upload all required files!")
-        return
+            self.eligible_template = os.path.join(templates_dir, "eligible_template.docx")
+            self.ineligible_template = os.path.join(templates_dir, "ineligible_template.docx")
 
-    try:
-        data = read_excel_csv(input_file)
-        if data is None:
-            messagebox.showerror("Error", "Failed to read data file.")
+            if not os.path.exists(self.eligible_template):
+                raise FileNotFoundError(f"Eligible template not found at {self.eligible_template}")
+            if not os.path.exists(self.ineligible_template):
+                raise FileNotFoundError(f"Ineligible template not found at {self.ineligible_template}")
+
+            logging.info("Default templates loaded successfully")
+
+        except Exception as e:
+            logging.error(f"Failed to load default templates: {str(e)}")
+            messagebox.showerror("Error", f"Failed to load default templates: {str(e)}")
+            self.root.destroy()
+
+    def setup_ui(self):
+        """Setup the main user interface"""
+        self.root.title("Automated ISD Document Generator")
+        self.root.geometry("1200x800")
+
+        # Main container
+        main_frame = tb.Frame(self.root)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+
+        # Left panel - Controls
+        control_frame = tb.Frame(main_frame)
+        control_frame.pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=10)
+
+        # Control buttons
+        btn_data = tb.Button(control_frame, text="📂 Upload Data File", command=self.upload_data_file)
+        btn_data.pack(fill=tk.X, padx=10, pady=5)
+
+        btn_output = tb.Button(control_frame, text="📁 Select Output Folder", command=self.select_output_folder)
+        btn_output.pack(fill=tk.X, padx=10, pady=5)
+
+        btn_start = tb.Button(control_frame, text="🚀 Generate ISD Invoices", bootstyle="success",
+                              command=self.start_processing)
+        btn_start.pack(fill=tk.X, padx=10, pady=20)
+
+        # Template status labels
+        self.lbl_eligible_template = tb.Label(control_frame,
+                                              text=f"✅ Eligible Template: {os.path.basename(self.eligible_template)}",
+                                              bootstyle="success")
+        self.lbl_eligible_template.pack(fill=tk.X, padx=10, pady=5)
+
+        self.lbl_ineligible_template = tb.Label(control_frame,
+                                                text=f"✅ Ineligible Template: {os.path.basename(self.ineligible_template)}",
+                                                bootstyle="success")
+        self.lbl_ineligible_template.pack(fill=tk.X, padx=10, pady=5)
+
+        # Status labels
+        self.lbl_data = tb.Label(control_frame, text="No Data File Loaded", bootstyle="secondary")
+        self.lbl_data.pack(fill=tk.X, padx=10, pady=5)
+
+        self.lbl_output = tb.Label(control_frame, text="No Output Folder Selected", bootstyle="secondary")
+        self.lbl_output.pack(fill=tk.X, padx=10, pady=5)
+
+        # Right panel - Data Preview
+        preview_frame = tb.Frame(main_frame)
+        preview_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        preview_label = tb.Label(preview_frame, text="Data Preview", bootstyle="primary")
+        preview_label.pack(fill=tk.X, pady=5)
+
+        # Create the treeview
+        self.tree = self.create_treeview(preview_frame)
+
+    def start_processing(self):
+        """Start the document generation process"""
+        if not all([self.input_file, self.output_folder]):
+            messagebox.showerror("Error", "Please select data file and output folder!")
             return
 
-        generated_files = map_data_to_docx(
-            template_path=template_file,
-            data=data,
-            output_folder=output_folder
-        )
+        try:
+            data = read_excel_csv(self.input_file)
+            if data is None:
+                messagebox.showerror("Error", "Failed to read data file.")
+                return
 
-        if not generated_files:
-            messagebox.showerror("Error", "No documents were generated.")
-            return
+            # Create output folders
+            pdf_output_folder = os.path.join(self.output_folder, "PDF_Output")
+            os.makedirs(pdf_output_folder, exist_ok=True)
 
-        # Convert generated DOCX files to PDF
-        pdf_output_folder = os.path.join(output_folder, "PDF_Output") #create pdf subfolder.
-        os.makedirs(pdf_output_folder, exist_ok=True) #make sure subfolder exists.
+            temp_docx_folder = os.path.join(self.output_folder, "TEMP_DOCX")
+            os.makedirs(temp_docx_folder, exist_ok=True)
 
-        for docx_file in generated_files:
-            pdf_file = os.path.join(pdf_output_folder, os.path.splitext(os.path.basename(docx_file))[0] + ".pdf")
+            success_count = 0
+
+            for idx, row in data.iterrows():
+                try:
+                    # Determine template type
+                    is_eligible = self.is_row_eligible(row)
+                    template_path = self.eligible_template if is_eligible else self.ineligible_template
+                    prefix = "Eligible" if is_eligible else "Ineligible"
+
+                    # Generate document
+                    doc = Document(template_path)
+                    placeholders = scan_template_placeholders(template_path)
+                    row_data = prepare_row_data(row, placeholders, is_eligible)
+
+                    if not replace_all_placeholders(doc, row_data):
+                        logging.error(f"Skipping row {idx} due to replacement errors")
+                        continue
+
+                    # Save temporary DOCX
+                    invoice_num = str(row.get('INVOICE_NUMBER', idx + 1)).strip()
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    docx_filename = f"{prefix}_ISD_{invoice_num}_{timestamp}.docx"
+                    docx_path = os.path.join(temp_docx_folder, docx_filename)
+                    doc.save(docx_path)
+
+                    # Convert to PDF
+                    pdf_filename = f"{prefix}_ISD_{invoice_num}_{timestamp}.pdf"
+                    pdf_path = os.path.join(pdf_output_folder, pdf_filename)
+                    convert(docx_path, pdf_path)
+
+                    # Delete temporary DOCX
+                    os.remove(docx_path)
+
+                    success_count += 1
+                    logging.info(f"Generated {pdf_filename}")
+
+                except Exception as e:
+                    logging.error(f"Error processing row {idx}: {str(e)}", exc_info=True)
+                    continue
+
+            # Remove temporary DOCX folder if empty
             try:
-                convert(docx_file, pdf_file)
-                logging.info(f"Converted {docx_file} to {pdf_file}")
+                os.rmdir(temp_docx_folder)
+            except OSError:
+                pass  # Folder not empty
+
+            messagebox.showinfo("Success",
+                                f"Processing complete!\n\nGenerated {success_count} PDF invoices.\n"
+                                f"Location: {pdf_output_folder}")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Processing failed: {str(e)}")
+            logging.error(f"Processing error: {str(e)}")
+
+    def is_row_eligible(self, row):
+        """Determine if row contains eligible or ineligible data"""
+        eligible_cols = [
+            'ELIGIBLE_CGST', 'ELIGIBLE_SGST', 'ELIGIBLE_UTGST', 'ELIGIBLE_IGST',
+            'ELIGIBLECGST', 'ELIGIBLESGST', 'ELIGIBLEUTGST', 'ELIGIBLEIGST'
+        ]
+
+        # Check if any eligible tax amount is > 0
+        for col in eligible_cols:
+            if col in row:
+                try:
+                    val = float(row[col]) if pd.notna(row[col]) else 0
+                    if val > 0:
+                        return True
+                except (ValueError, TypeError):
+                    continue
+        return False
+
+    def create_treeview(self, parent_frame):
+        """Create and configure the Treeview widget"""
+        tree_frame = tb.Frame(parent_frame)
+        tree_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        # Scrollbars
+        tree_scroll_y = tk.Scrollbar(tree_frame, orient="vertical")
+        tree_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+        tree_scroll_x = tk.Scrollbar(tree_frame, orient="horizontal")
+        tree_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # Treeview
+        tree = ttk.Treeview(tree_frame, style="Custom.Treeview",
+                            yscrollcommand=tree_scroll_y.set,
+                            xscrollcommand=tree_scroll_x.set)
+        tree.pack(pady=10, fill=tk.BOTH, expand=True)
+
+        # Configure scrollbars
+        tree_scroll_y.config(command=tree.yview)
+        tree_scroll_x.config(command=tree.xview)
+
+        return tree
+
+    def display_data(self, data):
+        """Display data in the Treeview"""
+        self.tree.delete(*self.tree.get_children())
+        self.tree["columns"] = list(data.columns)
+        self.tree["show"] = "headings"
+
+        for col in data.columns:
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=150, anchor="center")
+
+        for _, row in data.iterrows():
+            self.tree.insert("", "end", values=list(row))
+
+        self.tree.update_idletasks()
+
+    def setup_menu(self):
+        """Setup the menu bar"""
+        menu_bar = tk.Menu(self.root)
+
+        # File menu
+        file_menu = tk.Menu(menu_bar, tearoff=0)
+        file_menu.add_command(label="Upload Data File", command=self.upload_data_file)
+        file_menu.add_command(label="Exit", command=self.root.quit)
+        menu_bar.add_cascade(label="File", menu=file_menu)
+
+        # Theme menu
+        theme_menu = tk.Menu(menu_bar, tearoff=0)
+        theme_options = {
+            "darkly": "🌙 Dark",
+            "journal": "📖 Light",
+            "flatly": "📄 Flat",
+            "cyborg": "🤖 Cyborg",
+            "superhero": "🦸 Superhero",
+            "minty": "🌿 Minty"
+        }
+
+        for theme, label in theme_options.items():
+            theme_menu.add_command(label=label, command=lambda t=theme: self.change_theme(t))
+
+        menu_bar.add_cascade(label="Theme", menu=theme_menu)
+
+        self.root.config(menu=menu_bar)
+
+    def change_theme(self, selected_theme):
+        """Change the application theme"""
+        self.root.style.theme_use(selected_theme)
+
+    def upload_data_file(self):
+        """Handle data file upload"""
+        file_path = filedialog.askopenfilename(filetypes=[("Excel/CSV files", "*.xlsx;*.xls;*.csv")])
+        if file_path:
+            self.input_file = file_path
+            self.lbl_data.config(text=f"📂 {os.path.basename(file_path)} Loaded")
+            logging.info(f"Data file loaded: {file_path}")
+
+            try:
+                self.current_data = read_excel_csv(file_path)
+                if self.current_data is not None:
+                    self.display_data(self.current_data)
+                    messagebox.showinfo("Success", "Data file loaded and displayed successfully!")
+                else:
+                    messagebox.showerror("Error", "Failed to read data file.")
             except Exception as e:
-                logging.error(f"Error converting {docx_file} to PDF: {e}")
-                messagebox.showerror("Error", f"Error converting {docx_file} to PDF: {e}")
+                messagebox.showerror("Error", f"Failed to load data: {str(e)}")
+                logging.error(f"Data loading error: {str(e)}")
 
-        messagebox.showinfo("Success", "Documents generated and converted to PDF successfully!")
+    def select_output_folder(self):
+        """Handle output folder selection"""
+        folder = filedialog.askdirectory()
+        if folder:
+            self.output_folder = folder
+            self.lbl_output.config(text=f"📁 Output Folder: {folder}")
+            logging.info(f"Output folder selected: {folder}")
 
-    except Exception as e:
-        messagebox.showerror("Error", f"Processing failed: {str(e)}")
-        logging.error(f"Processing error: {str(e)}")
 
-# -------------------- DOCX to PDF Conversion Functions --------------------
-def convert_docx_to_pdf(docx_folder, output_folder):
-    """
-    Converts all DOCX files in the given folder to PDF files,
-    and saves them in the output folder.
-
-    Args:
-        docx_folder: Folder containing DOCX files.
-        output_folder: Folder to save the generated PDF files.
-    """
-    if not os.path.exists(docx_folder):
-        logging.error(f"DOCX folder not found: {docx_folder}")
-        messagebox.showerror("Error", f"DOCX folder not found: {docx_folder}")
-        return
-
-    if not os.path.exists(output_folder):
-        try:
-            os.makedirs(output_folder)
-        except Exception as e:
-            logging.error(f"Error creating output folder: {output_folder}, {e}")
-            messagebox.showerror("Error", f"Error creating output folder: {output_folder}")
-            return
-
-    docx_files = [f for f in os.listdir(docx_folder) if f.endswith(".docx")]
-
-    if not docx_files:
-        logging.warning("No DOCX files found in the folder.")
-        messagebox.showwarning("Warning", "No DOCX files found in the folder.")
-        return
-
-    for docx_file in docx_files:
-        docx_path = os.path.join(docx_folder, docx_file)
-        pdf_file = os.path.splitext(docx_file)[0] + ".pdf"
-        pdf_path = os.path.join(output_folder, pdf_file)
-
-        try:
-            convert(docx_path, pdf_path)
-            logging.info(f"Converted: {docx_file} to {pdf_file}")
-        except Exception as e:
-            logging.error(f"Error converting {docx_file}: {e}")
-            messagebox.showerror("Error", f"Error converting {docx_file}: {e}")
-
-def select_folders_and_convert():
-    """Selects input and output folders using file dialogs and starts conversion."""
-    docx_folder = filedialog.askdirectory(title="Select DOCX Folder")
-    if not docx_folder:
-        return  # User cancelled
-
-    output_folder = filedialog.askdirectory(title="Select Output PDF Folder")
-    if not output_folder:
-        return  # User cancelled
-
-    convert_docx_to_pdf(docx_folder, output_folder)
-    messagebox.showinfo("Conversion Complete", "DOCX to PDF conversion completed.")
-# --------------------------------------------------------------------------
-
-# 🔹 GUI Layout
-frame = tb.Frame(root)
-frame.pack(pady=20)
-
-btn_data = tb.Button(frame, text="📂 Upload Data File", command=upload_data_file)
-btn_data.grid(row=0, column=0, padx=10, pady=5)
-
-btn_template = tb.Button(frame, text="📄 Upload DOCX Template", command=upload_template)
-btn_template.grid(row=1, column=0, padx=10, pady=5)
-
-btn_output = tb.Button(frame, text="📁 Select Output Folder", command=select_output_folder)
-btn_output.grid(row=2, column=0, padx=10, pady=5)
-
-btn_start = tb.Button(frame, text="🚀 Start Processing", bootstyle="success", command=start_processing)
-btn_start.grid(row=3, column=0, padx=10, pady=20)
-
-btn_docx_to_pdf = tb.Button(frame, text="📄 to 📄 Convert DOCX to PDF", bootstyle="info", command=select_folders_and_convert)
-btn_docx_to_pdf.grid(row=4, column=0, padx=10, pady=20) #add the new button
-
-# Labels for file paths
-lbl_data = tb.Label(frame, text="No Data File Loaded", bootstyle="secondary")
-lbl_data.grid(row=0, column=1, padx=10, sticky="w")
-
-lbl_template = tb.Label(frame, text="No Template File Loaded", bootstyle="secondary")
-lbl_template.grid(row=1, column=1, padx=10, sticky="w")
-
-lbl_output = tb.Label(frame, text="No Output Folder Selected", bootstyle="secondary")
-lbl_output.grid(row=2, column=1, padx=10, sticky="w")
-
-root.mainloop()
+# Initialize and run the application
+if __name__ == "__main__":
+    theme = "darkly" if darkdetect.isDark() else "journal"
+    root = tb.Window(themename=theme)
+    app = DocumentFillerApp(root)
+    root.mainloop()

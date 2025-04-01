@@ -8,10 +8,11 @@ from datetime import datetime
 from copy import deepcopy
 from num2words import num2words
 from docx.shared import Pt
+from typing import Dict
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
-# Complete and corrected column mapping
+# Enhanced column mapping with both eligible and ineligible tax fields
 COLUMN_MAPPING = {
     # Invoice fields
     'invoicenumber': 'INVOICE_NUMBER',
@@ -25,7 +26,7 @@ COLUMN_MAPPING = {
     'isddistributorpincode': 'ISD_DISTRIBUTOR_PINCODE',
     'isddistributorstatecode': 'ISD_DISTRIBUTOR_STATE_CODE',
 
-    # Credit Recipient fields (corrected spelling)
+    # Credit Recipient fields
     'creditrecipientgstin': 'CREDIT_RECIPIENT_GSTIN',
     'creditrecipientname': 'CREDIT_RECIPIENT_NAME',
     'creditrecipientaddress': 'CREDIT_RECIPIENT_ADDRESS',
@@ -33,36 +34,59 @@ COLUMN_MAPPING = {
     'creditrecipientpincode': 'CREDIT_RECIPIENT_PINCODE',
     'creditrecipientstatecode': 'CREDIT_RECIPIENT_STATE_CODE',
 
-    # Tax fields
-    'cgst': 'CGST',
-    'sgst': 'SGST',
-    'utgst': 'UTGST',
-    'igst': 'IGST',
+    # Tax fields - Handle both eligible and ineligible
+    'eligiblecgst': 'ELIGIBLE_CGST',
+    'eligiblesgst': 'ELIGIBLE_SGST',
+    'eligibleutgst': 'ELIGIBLE_UTGST',
+    'eligibleigst': 'ELIGIBLE_IGST',
+    'ineligiblecgst': 'INELIGIBLE_CGST',
+    'ineligiblesgst': 'INELIGIBLE_SGST',
+    'ineligibleutgst': 'INELIGIBLE_UTGST',
+    'ineligibleigst': 'INELIGIBLE_IGST',
+    'cgst': 'CGST',  # Fallback
+    'sgst': 'SGST',  # Fallback
+    'utgst': 'UTGST',  # Fallback
+    'igst': 'IGST',  # Fallback
+
+    # Amount fields
     'amount': 'AMOUNT',
+    'total': 'AMOUNT',
 
     # Contact fields
     'regoffice': 'REG_OFFICE',
     'cin': 'CIN',
     'email': 'E_MAIL',
-    'e-mail': 'E_MAIL',  # Alternate mapping
+    'e-mail': 'E_MAIL',
     'website': 'WEBSITE',
 
     # Special fields
-    'amount_in_words': 'AMOUNT'  # Special handling
+    'amount_in_words': 'AMOUNT_IN_WORDS'
 }
 
 
 def normalize_column_names(df: pd.DataFrame) -> pd.DataFrame:
-    """Normalize column names to ensure consistent matching"""
+    """Enhanced column name normalization"""
     df.columns = [
-        col.strip().upper().replace(' ', '_').replace('-', '_')
+        col.strip().upper()
+        .replace(' ', '_')
+        .replace('-', '_')
+        .replace('.', '')
+        .replace('ELIGABLE', 'ELIGIBLE')  # Fix common typo
         for col in df.columns
     ]
     return df
 
 
-def map_data_to_docx(template_path: str, data: pd.DataFrame, output_folder: str) -> Optional[List[str]]:
-    """Main function to generate DOCX files from template and data"""
+def map_data_to_docx(template_path: str, data: pd.DataFrame, output_folder: str,
+                    is_eligible: bool = True) -> Optional[List[str]]:
+    """
+    Main function to generate DOCX files with template selection
+    Args:
+        template_path: Path to the template file
+        data: DataFrame containing the data
+        output_folder: Output directory for generated files
+        is_eligible: Boolean indicating whether to use eligible template
+    """
     try:
         if not validate_inputs(template_path, data, output_folder):
             return None
@@ -71,26 +95,24 @@ def map_data_to_docx(template_path: str, data: pd.DataFrame, output_folder: str)
         generated_files = []
         template_placeholders = scan_template_placeholders(template_path)
 
-        logging.info(f"Template placeholders: {template_placeholders}")
-        logging.info(f"Data columns: {data.columns.tolist()}")
+        logging.info(f"Processing {len(data)} rows with {'eligible' if is_eligible else 'ineligible'} template")
 
         for idx, row in data.iterrows():
             try:
                 doc = Document(template_path)
-                row_data = prepare_row_data(row, template_placeholders)
+                row_data = prepare_row_data(row, template_placeholders, is_eligible)
 
-                # Debug output for first row
-                if idx == 0:
+                if idx == 0:  # Debug info for first row
                     log_debug_info(row, template_placeholders, row_data)
 
                 if not replace_all_placeholders(doc, row_data):
                     logging.error(f"Skipping row {idx} due to replacement errors")
                     continue
 
-                output_path = generate_output_path(output_folder, row_data, idx)
+                output_path = generate_output_path(output_folder, row_data, idx, is_eligible)
                 doc.save(output_path)
                 generated_files.append(output_path)
-                logging.info(f"Generated: {output_path}")
+                logging.info(f"Generated: {os.path.basename(output_path)}")
 
             except Exception as e:
                 logging.error(f"Error processing row {idx}: {str(e)}", exc_info=True)
@@ -99,7 +121,7 @@ def map_data_to_docx(template_path: str, data: pd.DataFrame, output_folder: str)
         return generated_files if generated_files else None
 
     except Exception as e:
-        logging.error(f"Fatal error: {str(e)}", exc_info=True)
+        logging.error(f"Fatal error in document generation: {str(e)}", exc_info=True)
         return None
 
 
@@ -121,27 +143,54 @@ def validate_inputs(template_path: str, data: pd.DataFrame, output_folder: str) 
         return False
 
 
-def prepare_row_data(row: pd.Series, template_placeholders: Set[str]) -> Dict[str, str]:
-    """Prepare complete row data with all required fields and proper formatting"""
+def prepare_row_data(row: pd.Series, template_placeholders: Set[str],
+                     is_eligible: bool = True) -> Dict[str, str]:
+    """
+    Prepare complete row data with proper tax field selection and formatting
+    Args:
+        row: DataFrame row containing the data
+        template_placeholders: Set of placeholders found in the template
+        is_eligible: Boolean indicating whether to use eligible tax values
+    """
     row_data = {}
+    prefix = "ELIGIBLE_" if is_eligible else "INELIGIBLE_"
 
-    # Process all placeholders in template
+    # Process tax fields with proper prefix
+    tax_types = ['CGST', 'SGST', 'UTGST', 'IGST']
+    for tax in tax_types:
+        col_name = prefix + tax
+        alt_col_name = col_name.replace('_', '')  # Handle columns without underscore
+
+        # Try both column name formats
+        value = 0
+        if col_name in row:
+            value = safe_float_conversion(row[col_name])
+        elif alt_col_name in row:
+            value = safe_float_conversion(row[alt_col_name])
+
+        row_data[tax] = format_value(value, tax)
+
+    # Calculate total amount from the selected tax values
+    total_amount = sum(float(row_data.get(tax, 0)) for tax in tax_types)
+    row_data['AMOUNT'] = format_value(total_amount, 'AMOUNT')
+
+    # Process amount in words if placeholder exists
+    if any('amount_in_words' in ph.lower() for ph in template_placeholders):
+        try:
+            words = num2words(total_amount, lang='en_IN').title()
+            words = words.replace('And', 'and')  # Fix capitalization
+            row_data['AMOUNT_IN_WORDS'] = f"{words} Rupees Only"
+        except Exception as e:
+            logging.error(f"Amount to words conversion failed: {str(e)}")
+            row_data['AMOUNT_IN_WORDS'] = ""
+
+    # Process all other placeholders
     for ph in template_placeholders:
-        # Normalize the placeholder name
-        norm_ph = ph.lower().replace(' ', '').replace('.', '').replace('-', '')
-
-        # Special handling for amount_in_words
-        if norm_ph == 'amount_in_words':
-            try:
-                amount = float(row['AMOUNT'])
-                words = num2words(amount, lang='en_IN').title()
-                # Ensure proper formatting
-                words = words.replace('And', 'and')  # Fix capitalization
-                row_data['amount_in_words'] = f"{words} Rupees Only"
-            except Exception as e:
-                logging.error(f"Amount to words failed: {str(e)}")
-                row_data['amount_in_words'] = ""
+        if ph in row_data:  # Skip already processed fields
             continue
+
+        # Normalize placeholder name for matching
+        norm_ph = ph.lower().replace(' ', '').replace('-', '').replace('_', '').replace('.', '')
 
         # Find matching column using our mapping
         data_key = COLUMN_MAPPING.get(norm_ph)
@@ -153,11 +202,19 @@ def prepare_row_data(row: pd.Series, template_placeholders: Set[str]) -> Dict[st
                 value = value.item()
             row_data[ph] = format_value(value, ph)
         else:
-            row_data[ph] = ""
             logging.warning(f"No data mapping for placeholder: {ph} (normalized: {norm_ph})")
+            row_data[ph] = ""
 
     return row_data
 
+def safe_float_conversion(value):
+    """Safely convert values to float, handling various edge cases"""
+    if pd.isna(value) or value in ['', None]:
+        return 0.0
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return 0.0
 
 def replace_all_placeholders(doc: Document, row_data: Dict[str, str]) -> bool:
     """Replace placeholders throughout document with formatting preservation"""
@@ -193,36 +250,42 @@ def replace_all_placeholders(doc: Document, row_data: Dict[str, str]) -> bool:
 
 
 def replace_in_paragraph(paragraph, row_data: Dict[str, str]):
-    """Replace placeholders in a paragraph while preserving formatting"""
+    """Enhanced placeholder replacement with bold formatting preservation"""
     # First combine all runs to handle split placeholders
     full_text = ''.join(run.text for run in paragraph.runs)
 
-    # Skip if no placeholders
-    if not any(f'{{{{{ph}}}}}' in full_text for ph in row_data):
+    # Skip if no placeholders or bold markers
+    if not (any(f'{{{{{ph}}}}}' in full_text for ph in row_data) or '**' in full_text):
         return
 
-    # Perform all replacements
+    # Perform all placeholder replacements first
     modified_text = full_text
     for ph, value in row_data.items():
-        modified_text = modified_text.replace(f'{{{{{ph}}}}}', value)
+        modified_text = modified_text.replace(f'{{{{{ph}}}}}', str(value))
 
     # Only update if changes were made
     if modified_text != full_text:
         # Clear existing content
         paragraph.clear()
 
-        # Add new content with preserved formatting
-        run = paragraph.add_run(modified_text)
-        run.font.size = Pt(10)
+        # Split text by bold markers and process each segment
+        parts = modified_text.split('**')
+        for i, part in enumerate(parts):
+            run = paragraph.add_run(part)
+            run.font.size = Pt(10)
 
-        # Preserve other formatting from first run if available
-        if paragraph.runs and paragraph.runs[0].font.name:
-            run.font.name = paragraph.runs[0].font.name
+            # Apply bold to every odd segment (text between ** markers)
+            if i % 2 == 1:  # This is text between ** markers
+                run.bold = True
+
+            # Preserve original font if available
+            if paragraph.runs and paragraph.runs[0].font.name:
+                run.font.name = paragraph.runs[0].font.name
 
 
 def format_value(value, key=None) -> str:
-    """Format values with special handling for certain fields"""
-    if pd.isna(value):
+    """Enhanced value formatting with special cases"""
+    if pd.isna(value) or value in ['', None]:
         return ""
 
     # Handle numpy types
@@ -268,27 +331,28 @@ def scan_template_placeholders(template_path: str) -> Set[str]:
     return {ph for ph in placeholders if ph}  # Remove empty strings
 
 
-def generate_output_path(output_folder: str, row_data: dict, idx: int) -> str:
-    """Generate output path with invoice number if available"""
-    invoice_num = str(row_data.get('Invoice Number', idx + 1)).strip()
+def generate_output_path(output_folder: str, row_data: dict, idx: int,
+                         is_eligible: bool) -> str:
+    """Generate output path with type prefix and invoice number"""
+    invoice_num = str(row_data.get('INVOICE_NUMBER', idx + 1)).strip()
+    prefix = "ELIGIBLE" if is_eligible else "INELIGIBLE"
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return os.path.join(output_folder, f"ISD_Invoice_{invoice_num}_{timestamp}.docx")
+    return os.path.join(output_folder, f"{prefix}_ISD_{invoice_num}_{timestamp}.docx")
 
 
 def log_debug_info(row, template_placeholders, row_data):
-    """Log debug information for the first row"""
+    """Enhanced debug logging with more details"""
     logging.info("\n=== DEBUG INFORMATION ===")
-    logging.info(f"Template placeholders: {template_placeholders}")
-    logging.info(f"Data columns: {row.index.tolist()}")
-    logging.info(f"First row data: {dict(row)}")
+    logging.info(f"Template placeholders: {sorted(template_placeholders)}")
+    logging.info(f"Data columns: {sorted(row.index.tolist())}")
 
     logging.info("\n=== PLACEHOLDER MAPPING ===")
-    for ph in template_placeholders:
+    for ph in sorted(template_placeholders):
         norm_ph = ph.lower().replace(' ', '').replace('.', '').replace('-', '')
         data_key = COLUMN_MAPPING.get(norm_ph, "NO MATCH")
         logging.info(f"Template: {ph:25} → Data: {data_key}")
 
     logging.info("\n=== MATCHED DATA ===")
-    for ph, value in row_data.items():
+    for ph, value in sorted(row_data.items()):
         logging.info(f"{ph:25}: {value}")
     logging.info("=====================")
