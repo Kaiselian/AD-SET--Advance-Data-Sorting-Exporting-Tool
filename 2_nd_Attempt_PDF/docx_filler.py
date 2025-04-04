@@ -5,113 +5,129 @@ from docx import Document
 from docx.shared import Pt
 from typing import Dict, List, Optional
 from datetime import datetime
-from data_mapper import prepare_row_data, map_data_to_docx
-
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
+# Hardcoded bold elements
+BOLD_ELEMENTS = {
+    'invoicenumber',
+    'invoicedate',
+    'Details of ISD Distributor: -',
+    'Details of Credit Recipient: -',
+    'Name:',
+    'Adress:',
+    'Pin code:',
+    'State Name:',
+    'State code:',
+    'GSTIN:'
+}
 
-def fill_docx_template(template_path: str, output_path: str, replacements: Dict) -> bool:
-    """
-    Fill a DOCX template with provided replacements while preserving formatting
-    Args:
-        template_path: Path to the template DOCX file
-        output_path: Path to save the filled document
-        replacements: Dictionary of placeholder-value pairs
-    Returns:
-        bool: True if successful, False otherwise
-    """
+
+def fill_docx_template(template_path: str, output_path: str, replacements: Dict[str, str]) -> bool:
+    """Fill template with values and apply hardcoded bold formatting"""
     try:
         doc = Document(template_path)
 
-        if not replace_all_placeholders(doc, replacements):
-            return False
-
-        doc.save(output_path)
-        return True
-
-    except Exception as e:
-        logging.error(f"Error filling template: {str(e)}")
-        return False
-
-
-def replace_all_placeholders(doc: Document, row_data: Dict[str, str]) -> bool:
-    """
-    Replace placeholders throughout all document components
-    Args:
-        doc: The Document object to process
-        row_data: Dictionary of placeholder replacements
-    Returns:
-        bool: True if successful, False if errors occurred
-    """
-    try:
-        # Process main document paragraphs
+        # Process all paragraphs
         for paragraph in doc.paragraphs:
-            replace_in_paragraph(paragraph, row_data)
+            process_paragraph(paragraph, replacements)
 
         # Process tables
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
                     for paragraph in cell.paragraphs:
-                        replace_in_paragraph(paragraph, row_data)
+                        process_paragraph(paragraph, replacements)
 
-        # Process headers and footers
-        for section in doc.sections:
-            for header in [section.header, section.first_page_header]:
-                if header:
-                    for paragraph in header.paragraphs:
-                        replace_in_paragraph(paragraph, row_data)
-
-            for footer in [section.footer, section.first_page_footer]:
-                if footer:
-                    for paragraph in footer.paragraphs:
-                        replace_in_paragraph(paragraph, row_data)
-
+        doc.save(output_path)
         return True
-
     except Exception as e:
-        logging.error(f"Error replacing placeholders: {str(e)}", exc_info=True)
+        logging.error(f"Error: {str(e)}")
         return False
 
 
-def replace_in_paragraph(paragraph, row_data: Dict[str, str]):
-    """
-    Replace placeholders in a paragraph while preserving formatting
-    Handles bold formatting (**text**) in the template
-    Args:
-        paragraph: The paragraph to process
-        row_data: Dictionary of placeholder replacements
-    """
-    # Combine runs to handle split placeholders
-    full_text = ''.join(run.text for run in paragraph.runs)
-
-    # Skip if no placeholders or bold markers
-    if not (any(f'{{{{{ph}}}}}' in full_text for ph in row_data) or '**' in full_text):
+def process_paragraph(paragraph, replacements):
+    """Process paragraph with hardcoded bold formatting"""
+    original_text = paragraph.text
+    if not original_text:
         return
 
-    # Perform all placeholder replacements
-    modified_text = full_text
-    for ph, value in row_data.items():
-        modified_text = modified_text.replace(f'{{{{{ph}}}}}', str(value))
+    # Clear existing content
+    paragraph.clear()
 
-    # Only update if changes were made
-    if modified_text != full_text:
-        paragraph.clear()
+    # Split text into parts that need bold formatting
+    parts = re.split(r'(' + '|'.join(map(re.escape, BOLD_ELEMENTS)) + r')', original_text)
 
-        # Split text by bold markers and process each segment
-        parts = modified_text.split('**')
-        for i, part in enumerate(parts):
-            run = paragraph.add_run(part)
-            run.font.size = Pt(10)  # Maintain font size
+    for part in parts:
+        if not part:
+            continue
 
-            # Apply bold to text between ** markers
-            if i % 2 == 1:
-                run.bold = True
+        run = paragraph.add_run(part)
 
-            # Preserve original font if available
-            if paragraph.runs and paragraph.runs[0].font.name:
-                run.font.name = paragraph.runs[0].font.name
+        # Apply bold if part matches our hardcoded elements
+        if part in BOLD_ELEMENTS:
+            run.bold = True
+
+        # Replace placeholders if they exist in this part
+        for ph, value in replacements.items():
+            if ph in part:
+                run.text = run.text.replace(ph, str(value))
+
+
+def replace_all_placeholders(doc: Document, row_data: Dict[str, str]) -> bool:
+    """Replace placeholders throughout document with hardcoded bold elements"""
+    try:
+        # Process all document components
+        components = [
+            doc.paragraphs,
+            *[cell.paragraphs for table in doc.tables
+              for row in table.rows
+              for cell in row.cells],
+            *[section.header.paragraphs for section in doc.sections],
+            *[section.footer.paragraphs for section in doc.sections]
+        ]
+
+        for paragraphs in components:
+            for paragraph in paragraphs:
+                process_paragraph(paragraph, row_data)
+
+        return True
+    except Exception as e:
+        logging.error(f"Error replacing placeholders: {str(e)}")
+        return False
+
+
+def scan_template_placeholders(template_path: str) -> Set[str]:
+    """
+    Scan a DOCX template and extract all unique placeholder variables
+    Args:
+        template_path: Path to the template DOCX file
+    Returns:
+        Set of all unique placeholder names found in the template
+    """
+    doc = Document(template_path)
+    placeholders = set()
+    # Match both {{ }} and {[ ]} styles, and clean the names
+    pattern = re.compile(r'\{\{?\s*([^{}]+?)\s*\}?\}')
+
+    def scan_text(text: str):
+        return {match.group(1).strip() for match in pattern.finditer(text)}
+
+    # Check all document components
+    components = [
+        doc.paragraphs,
+        *[cell.paragraphs for table in doc.tables
+          for row in table.rows
+          for cell in row.cells],
+        *[section.header.paragraphs for section in doc.sections],
+        *[section.footer.paragraphs for section in doc.sections]
+    ]
+
+    for paragraphs in components:
+        for paragraph in paragraphs:
+            placeholders.update(scan_text(paragraph.text))
+
+    return placeholders
 
 
 def generate_output_filename(row_data: Dict, idx: int, is_eligible: bool) -> str:
