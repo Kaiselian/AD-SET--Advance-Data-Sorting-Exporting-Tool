@@ -1,0 +1,46 @@
+2025-04-10 22:45:33,051 - INFO - Loaded Tax Invoice template: C:\Users\Aniket\AppData\Local\Temp\_MEI160362\templates\Tax-Note.docx
+2025-04-10 22:45:33,054 - INFO - Loaded Credit Note template: C:\Users\Aniket\AppData\Local\Temp\_MEI160362\templates\Tax-Note.docx
+2025-04-10 22:45:33,054 - INFO - Loaded Debit Note template: C:\Users\Aniket\AppData\Local\Temp\_MEI160362\templates\Tax-Note.docx
+2025-04-10 22:45:33,055 - INFO - Loaded Eligible template: C:\Users\Aniket\AppData\Local\Temp\_MEI160362\templates\Eligible_template.docx
+2025-04-10 22:45:33,055 - INFO - Loaded Ineligible template: C:\Users\Aniket\AppData\Local\Temp\_MEI160362\templates\Ineligible_template.docx
+2025-04-10 22:47:10,562 - INFO - Loaded Tax Invoice template: C:\Users\Aniket\AppData\Local\Temp\_MEI320722\templates\Tax-Note.docx
+2025-04-10 22:47:10,563 - INFO - Loaded Credit Note template: C:\Users\Aniket\AppData\Local\Temp\_MEI320722\templates\Tax-Note.docx
+2025-04-10 22:47:10,563 - INFO - Loaded Debit Note template: C:\Users\Aniket\AppData\Local\Temp\_MEI320722\templates\Tax-Note.docx
+2025-04-10 22:47:10,564 - INFO - Loaded Eligible template: C:\Users\Aniket\AppData\Local\Temp\_MEI320722\templates\Eligible_template.docx
+2025-04-10 22:47:10,564 - INFO - Loaded Ineligible template: C:\Users\Aniket\AppData\Local\Temp\_MEI320722\templates\Ineligible_template.docx
+2025-04-10 22:47:19,010 - INFO - Data file loaded: C:/Users/Aniket/Downloads/Document-Type.xlsx
+2025-04-10 22:47:33,322 - INFO - Data file loaded: C:/Users/Aniket/Downloads/Test - Copy.xlsx
+2025-04-10 22:47:45,978 - INFO - Output folder selected: C:/Users/Aniket/Downloads/Excel-Test/198
+2025-04-10 22:47:46,974 - INFO - Placeholder replacement success: 100.0%
+2025-04-10 22:47:46,982 - INFO - Temporary DOCX created: C:/Users/Aniket/Downloads/Excel-Test/198\temp_docx\Eligible_200722SI310300_20250410_224746.docx
+2025-04-10 22:47:54,001 - INFO - PDF generated: C:/Users/Aniket/Downloads/Excel-Test/198\Eligible_200722SI310300_20250410_224746.pdf
+2025-04-10 22:47:54,001 - INFO - Deleted temporary DOCX: C:/Users/Aniket/Downloads/Excel-Test/198\temp_docx\Eligible_200722SI310300_20250410_224746.docx
+2025-04-10 22:47:54,040 - INFO - Placeholder replacement success: 100.0%
+2025-04-10 22:47:54,049 - INFO - Temporary DOCX created: C:/Users/Aniket/Downloads/Excel-Test/198\temp_docx\Ineligible_200722SI310301_20250410_224754.docx
+2025-04-10 22:47:56,876 - INFO - PDF generated: C:/Users/Aniket/Downloads/Excel-Test/198\Ineligible_200722SI310301_20250410_224754.pdf
+2025-04-10 22:47:56,877 - INFO - Deleted temporary DOCX: C:/Users/Aniket/Downloads/Excel-Test/198\temp_docx\Ineligible_200722SI310301_20250410_224754.docx
+2025-04-10 22:47:56,965 - INFO - Placeholder replacement success: 100.0%
+2025-04-10 22:47:56,980 - INFO - Temporary DOCX created: C:/Users/Aniket/Downloads/Excel-Test/198\temp_docx\Eligible_200722SI310302_20250410_224756.docx
+2025-04-10 22:47:59,770 - INFO - PDF generated: C:/Users/Aniket/Downloads/Excel-Test/198\Eligible_200722SI310302_20250410_224756.pdf
+2025-04-10 22:47:59,772 - INFO - Deleted temporary DOCX: C:/Users/Aniket/Downloads/Excel-Test/198\temp_docx\Eligible_200722SI310302_20250410_224756.docx
+2025-04-10 22:47:59,849 - INFO - Placeholder replacement success: 100.0%
+2025-04-10 22:47:59,865 - INFO - Temporary DOCX created: C:/Users/Aniket/Downloads/Excel-Test/198\temp_docx\Ineligible_200722SI310303_20250410_224759.docx
+2025-04-10 22:48:05,026 - INFO - PDF generated: C:/Users/Aniket/Downloads/Excel-Test/198\Ineligible_200722SI310303_20250410_224759.pdf
+2025-04-10 22:48:05,027 - INFO - Deleted temporary DOCX: C:/Users/Aniket/Downloads/Excel-Test/198\temp_docx\Ineligible_200722SI310303_20250410_224759.docx
+2025-04-10 22:48:05,110 - INFO - Placeholder replacement success: 100.0%
+2025-04-10 22:48:05,119 - INFO - Temporary DOCX created: C:/Users/Aniket/Downloads/Excel-Test/198\temp_docx\Eligible_200722SI310304_20250410_224805.docx
+2025-04-10 22:48:10,126 - INFO - PDF generated: C:/Users/Aniket/Downloads/Excel-Test/198\Eligible_200722SI310304_20250410_224805.pdf
+2025-04-10 22:48:10,127 - INFO - Deleted temporary DOCX: C:/Users/Aniket/Downloads/Excel-Test/198\temp_docx\Eligible_200722SI310304_20250410_224805.docx
+2025-04-10 22:48:10,172 - INFO - Placeholder replacement success: 100.0%
+2025-04-10 22:48:10,179 - INFO - Temporary DOCX created: C:/Users/Aniket/Downloads/Excel-Test/198\temp_docx\Ineligible_200722SI310305_20250410_224810.docx
+2025-04-10 22:48:15,240 - INFO - PDF generated: C:/Users/Aniket/Downloads/Excel-Test/198\Ineligible_200722SI310305_20250410_224810.pdf
+2025-04-10 22:48:15,241 - INFO - Deleted temporary DOCX: C:/Users/Aniket/Downloads/Excel-Test/198\temp_docx\Ineligible_200722SI310305_20250410_224810.docx
+2025-04-10 22:48:15,333 - INFO - Placeholder replacement success: 100.0%
+2025-04-10 22:48:15,344 - INFO - Temporary DOCX created: C:/Users/Aniket/Downloads/Excel-Test/198\temp_docx\Eligible_200722SI310306_20250410_224815.docx
+2025-04-10 22:48:20,468 - INFO - PDF generated: C:/Users/Aniket/Downloads/Excel-Test/198\Eligible_200722SI310306_20250410_224815.pdf
+2025-04-10 22:48:20,470 - INFO - Deleted temporary DOCX: C:/Users/Aniket/Downloads/Excel-Test/198\temp_docx\Eligible_200722SI310306_20250410_224815.docx
+2025-04-11 12:43:15,467 - INFO - Loaded Tax Invoice template: C:\Users\Aniket\AppData\Local\Temp\_MEI116162\templates\Tax-Note.docx
+2025-04-11 12:43:15,470 - INFO - Loaded Credit Note template: C:\Users\Aniket\AppData\Local\Temp\_MEI116162\templates\Tax-Note.docx
+2025-04-11 12:43:15,470 - INFO - Loaded Debit Note template: C:\Users\Aniket\AppData\Local\Temp\_MEI116162\templates\Tax-Note.docx
+2025-04-11 12:43:15,471 - INFO - Loaded Eligible template: C:\Users\Aniket\AppData\Local\Temp\_MEI116162\templates\Eligible_template.docx
+2025-04-11 12:43:15,475 - INFO - Loaded Ineligible template: C:\Users\Aniket\AppData\Local\Temp\_MEI116162\templates\Ineligible_template.docx
